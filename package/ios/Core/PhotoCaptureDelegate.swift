@@ -17,10 +17,12 @@ private var delegatesReferences: [NSObject] = []
 class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
     private let promise: Promise
     private let enableShutterSound: Bool
+    private let currentOrientation: UIInterfaceOrientation
 
-    required init(promise: Promise, enableShutterSound: Bool) {
+    required init(promise: Promise, enableShutterSound: Bool, currentOrientation: UIInterfaceOrientation) {
         self.promise = promise
         self.enableShutterSound = enableShutterSound
+        self.currentOrientation = currentOrientation
         super.init()
         delegatesReferences.append(self)
     }
@@ -50,13 +52,19 @@ class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
         }
         let url = URL(string: "file://\(tempFilePath)")!
 
-        guard let data = photo.fileDataRepresentation() else {
+        guard let data = photo.fileDataRepresentation(), let image = UIImage(data: data) else {
+            promise.reject(error: .capture(.fileError))
+            return
+        }
+
+        let transformedimage = image.transformedImage(interfaceOrientation: currentOrientation)
+        guard let transformedData = transformedimage.jpegData(compressionQuality: 1.0) else {
             promise.reject(error: .capture(.fileError))
             return
         }
 
         do {
-            try data.write(to: url)
+            try transformedData.write(to: url)
             let exif = photo.metadata["{Exif}"] as? [String: Any]
             let width = exif?["PixelXDimension"]
             let height = exif?["PixelYDimension"]
@@ -161,5 +169,48 @@ class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
         default:
             return false
         }
+    }
+}
+
+extension UIImage {
+    func transformedImage(interfaceOrientation: UIInterfaceOrientation) -> UIImage {
+        switch interfaceOrientation {
+        case .landscapeRight:
+            return rotate(degrees: 90)
+
+        case .landscapeLeft:
+            return rotate(degrees: -90)
+
+        case .portraitUpsideDown:
+            return rotate(degrees: 180)
+
+        case .portrait:
+            return self
+
+        default:
+            return self
+        }
+    }
+
+    func rotate(degrees: CGFloat) -> UIImage {
+        let radians = degrees * (CGFloat(Double.pi) / 180)
+        let rotatedSize = CGRect(origin: .zero, size: size)
+            .applying(CGAffineTransform(rotationAngle: CGFloat(radians)))
+            .integral.size
+        UIGraphicsBeginImageContext(rotatedSize)
+        if let context = UIGraphicsGetCurrentContext() {
+            let origin = CGPoint(x: rotatedSize.width / 2.0,
+                                 y: rotatedSize.height / 2.0)
+            context.translateBy(x: origin.x, y: origin.y)
+            context.rotate(by: radians)
+            draw(in: CGRect(x: -origin.y, y: -origin.x,
+                            width: size.width, height: size.height))
+            let rotatedImage = UIGraphicsGetImageFromCurrentImageContext()
+            UIGraphicsEndImageContext()
+
+            return rotatedImage ?? self
+        }
+
+        return self
     }
 }
