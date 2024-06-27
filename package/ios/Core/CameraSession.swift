@@ -30,17 +30,20 @@ class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
   var audioOutput: AVCaptureAudioDataOutput?
   var codeScannerOutput: AVCaptureMetadataOutput?
   // State
+  var metadataProvider = MetadataProvider()
   var recordingSession: RecordingSession?
-  var isRecording = false
+  var didCancelRecording = false
+  var orientationManager = OrientationManager()
   let coreMotion: CMMotionManager
   var currentOrientation: UIInterfaceOrientation = .portrait
+
   // Callbacks
   weak var delegate: CameraSessionDelegate?
 
   // Public accessors
   var maxZoom: Double {
     if let device = videoDeviceInput?.device {
-      return device.maxAvailableVideoZoomFactor
+      return device.activeFormat.videoMaxZoomFactor
     }
     return 1.0
   }
@@ -53,7 +56,6 @@ class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
     coreMotion = CMMotionManager()
     super.init()
     coreMotion.accelerometerUpdateInterval = 0.2
-
     //  Using main queue is not recommended. So create new operation queue and pass it to startAccelerometerUpdatesToQueue.
     //  Dispatch U/I code to main thread using dispach_async in the handler.
     coreMotion.startAccelerometerUpdates( to: OperationQueue() ) { [ weak self] data, _ in
@@ -65,6 +67,8 @@ class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
           }
       }
     }
+
+    orientationManager.delegate = self
     NotificationCenter.default.addObserver(self,
                                            selector: #selector(sessionRuntimeError),
                                            name: .AVCaptureSessionRuntimeError,
@@ -96,7 +100,9 @@ class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
    Creates a PreviewView for the current Capture Session
    */
   func createPreviewView(frame: CGRect) -> PreviewView {
-    return PreviewView(frame: frame, session: captureSession)
+    let previewView = PreviewView(frame: frame, session: captureSession)
+    orientationManager.setPreviewView(previewView)
+    return previewView
   }
 
   func onConfigureError(_ error: Error) {
@@ -112,11 +118,11 @@ class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
 
   /**
    Update the session configuration.
-   Any changes in here will be re-configured only if required, and under a lock.
+   Any changes in here will be re-configured only if required, and under a lock (in this case, the serial cameraQueue DispatchQueue).
    The `configuration` object is a copy of the currently active configuration that can be modified by the caller in the lambda.
    */
   func configure(_ lambda: @escaping (_ configuration: CameraConfiguration) throws -> Void) {
-    ReactLogger.log(level: .info, message: "configure { ... }: Waiting for lock...")
+    VisionLogger.log(level: .info, message: "configure { ... }: Waiting for lock...")
 
     // Set up Camera (Video) Capture Session (on camera queue, acts like a lock)
     CameraQueues.cameraQueue.async {
@@ -124,13 +130,17 @@ class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
       let config = CameraConfiguration(copyOf: self.configuration)
       do {
         try lambda(config)
+      } catch CameraConfiguration.AbortThrow.abort {
+        // call has been aborted and changes shall be discarded
+        return
       } catch {
+        // another error occured, possibly while trying to parse enums
         self.onConfigureError(error)
         return
       }
       let difference = CameraConfiguration.Difference(between: self.configuration, and: config)
 
-      ReactLogger.log(level: .info, message: "configure { ... }: Updating CameraSession Configuration... \(difference)")
+      VisionLogger.log(level: .info, message: "configure { ... }: Updating CameraSession Configuration... \(difference)")
 
       do {
         // If needed, configure the AVCaptureSession (inputs, outputs)
@@ -149,9 +159,9 @@ class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
           if difference.videoStabilizationChanged {
             self.configureVideoStabilization(configuration: config)
           }
-          // 4. Update output orientation
+          // 4. Update target output orientation
           if difference.orientationChanged {
-            self.configureOrientation(configuration: config)
+            self.orientationManager.setTargetOutputOrientation(config.outputOrientation)
           }
         }
 
@@ -166,24 +176,25 @@ class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
             device.unlockForConfiguration()
           }
 
-          // 4. Configure format
+          // 5. Configure format
           if difference.formatChanged {
             try self.configureFormat(configuration: config, device: device)
           }
-          // 5. After step 2. and 4., we also need to configure the PixelFormat.
-          //    This needs to be done AFTER we updated the `format`, as this controls the supported PixelFormats.
+          // 6. After step 2. and 4., we also need to configure some output properties that depend on format.
+          //    This needs to be done AFTER we updated the `format`, as this controls the supported properties.
           if difference.outputsChanged || difference.formatChanged {
-            try self.configurePixelFormat(configuration: config)
+            self.configureVideoOutputFormat(configuration: config)
+            self.configurePhotoOutputFormat(configuration: config)
           }
-          // 6. Configure side-props (fps, lowLightBoost)
+          // 7. Configure side-props (fps, lowLightBoost)
           if difference.sidePropsChanged {
             try self.configureSideProps(configuration: config, device: device)
           }
-          // 7. Configure zoom
+          // 8. Configure zoom
           if difference.zoomChanged {
             self.configureZoom(configuration: config, device: device)
           }
-          // 8. Configure exposure bias
+          // 9. Configure exposure bias
           if difference.exposureChanged {
             self.configureExposure(configuration: config, device: device)
           }
@@ -195,21 +206,16 @@ class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
           self.captureSession.commitConfiguration()
         }
 
-        // 9. Start or stop the session if needed
+        // 10. Start or stop the session if needed
         self.checkIsActive(configuration: config)
 
-        // 10. Enable or disable the Torch if needed (requires session to be running)
+        // 11. Enable or disable the Torch if needed (requires session to be running)
         if difference.torchChanged {
           try device.lockForConfiguration()
           defer {
             device.unlockForConfiguration()
           }
           try self.configureTorch(configuration: config, device: device)
-        }
-
-        // Notify about Camera initialization
-        if difference.inputChanged {
-          self.delegate?.onSessionInitialized()
         }
 
         // After configuring, set this to the new configuration.
@@ -223,14 +229,27 @@ class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
         CameraQueues.audioQueue.async {
           do {
             // Lock Capture Session for configuration
-            ReactLogger.log(level: .info, message: "Beginning AudioSession configuration...")
+            VisionLogger.log(level: .info, message: "Beginning AudioSession configuration...")
             self.audioCaptureSession.beginConfiguration()
 
             try self.configureAudioSession(configuration: config)
 
             // Unlock Capture Session again and submit configuration to Hardware
             self.audioCaptureSession.commitConfiguration()
-            ReactLogger.log(level: .info, message: "Committed AudioSession configuration!")
+            VisionLogger.log(level: .info, message: "Committed AudioSession configuration!")
+          } catch {
+            self.onConfigureError(error)
+          }
+        }
+      }
+
+      // Set up Location streaming (on location queue)
+      if difference.locationChanged {
+        CameraQueues.locationQueue.async {
+          do {
+            VisionLogger.log(level: .info, message: "Beginning Location Output configuration...")
+            try self.configureLocationOutput(configuration: config)
+            VisionLogger.log(level: .info, message: "Finished Location Output configuration!")
           } catch {
             self.onConfigureError(error)
           }
@@ -257,32 +276,47 @@ class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
     }
   }
 
-  /**
-   Called for every new Frame in the Video output
-   */
-  public final func captureOutput(_ captureOutput: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from _: AVCaptureConnection) {
-    // Call Frame Processor (delegate) for every Video Frame
-    if captureOutput is AVCaptureVideoDataOutput {
-      delegate?.onFrame(sampleBuffer: sampleBuffer)
+  public final func captureOutput(_ captureOutput: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+    switch captureOutput {
+    case is AVCaptureVideoDataOutput:
+      onVideoFrame(sampleBuffer: sampleBuffer, orientation: connection.orientation)
+    case is AVCaptureAudioDataOutput:
+      onAudioFrame(sampleBuffer: sampleBuffer)
+    default:
+      break
+    }
+  }
+
+  private final func onVideoFrame(sampleBuffer: CMSampleBuffer, orientation: Orientation) {
+    if let recordingSession {
+      do {
+        // Write the Video Buffer to the .mov/.mp4 file
+        try recordingSession.append(buffer: sampleBuffer, ofType: .video)
+      } catch let error as CameraError {
+        delegate?.onError(error)
+      } catch {
+        delegate?.onError(.capture(.unknown(message: error.localizedDescription)))
+      }
     }
 
-    // Record Video Frame/Audio Sample to File in custom `RecordingSession` (AVAssetWriter)
-    if isRecording {
-      guard let recordingSession = recordingSession else {
-        delegate?.onError(.capture(.unknown(message: "isRecording was true but the RecordingSession was null!")))
-        return
-      }
+    if let delegate {
+      // Call Frame Processor (delegate) for every Video Frame
+      let relativeBufferOrientation = orientation.relativeTo(orientation: outputOrientation)
+      delegate.onFrame(sampleBuffer: sampleBuffer, orientation: relativeBufferOrientation)
+    }
+  }
 
-      switch captureOutput {
-      case is AVCaptureVideoDataOutput:
-        // Write the Video Buffer to the .mov/.mp4 file, this is the first timestamp if nothing has been recorded yet
-        recordingSession.appendBuffer(sampleBuffer, clock: captureSession.clock, type: .video)
-      case is AVCaptureAudioDataOutput:
-        // Synchronize the Audio Buffer with the Video Session's time because it's two separate AVCaptureSessions
+  private final func onAudioFrame(sampleBuffer: CMSampleBuffer) {
+    if let recordingSession {
+      do {
+        // Synchronize the Audio Buffer with the Video Session's time because it's two separate
+        // AVCaptureSessions, then write it to the .mov/.mp4 file
         audioCaptureSession.synchronizeBuffer(sampleBuffer, toSession: captureSession)
-        recordingSession.appendBuffer(sampleBuffer, clock: audioCaptureSession.clock, type: .audio)
-      default:
-        break
+        try recordingSession.append(buffer: sampleBuffer, ofType: .audio)
+      } catch let error as CameraError {
+        delegate?.onError(error)
+      } catch {
+        delegate?.onError(.capture(.unknown(message: error.localizedDescription)))
       }
     }
   }
@@ -291,7 +325,7 @@ class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
 
   @objc
   func sessionRuntimeError(notification: Notification) {
-    ReactLogger.log(level: .error, message: "Unexpected Camera Runtime Error occured!")
+    VisionLogger.log(level: .error, message: "Unexpected Camera Runtime Error occured!")
     guard let error = notification.userInfo?[AVCaptureSessionErrorKey] as? AVError else {
       return
     }

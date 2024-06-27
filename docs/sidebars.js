@@ -1,10 +1,11 @@
 module.exports = {
   visionSidebar: {
     Guides: [
-      'guides/setup',
+      'guides/getting-started',
       'guides/devices',
       'guides/lifecycle',
       'guides/formats',
+      'guides/preview',
       'guides/taking-photos',
       'guides/recording-videos',
       'guides/code-scanning',
@@ -13,7 +14,8 @@ module.exports = {
         label: 'Realtime Frame Processing',
         items: [
           'guides/frame-processors',
-          'guides/frame-processor-plugins',
+          'guides/frame-processors-interacting',
+          'guides/frame-processor-plugins-community',
           'guides/pixel-formats',
           'guides/frame-processors-tips',
           'guides/skia-frame-processors',
@@ -32,9 +34,11 @@ module.exports = {
       },
       'guides/zooming',
       'guides/focusing',
+      'guides/orientation',
       'guides/exposure',
       'guides/hdr',
       'guides/stabilization',
+      'guides/location',
       'guides/performance',
       'guides/errors',
       'guides/mocking',

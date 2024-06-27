@@ -21,7 +21,7 @@ extension CameraSession {
       throw CameraError.device(DeviceError.focusNotSupported)
     }
 
-    ReactLogger.log(level: .info, message: "Focusing (\(point.x), \(point.y))...")
+    VisionLogger.log(level: .info, message: "Focusing (\(point.x), \(point.y))...")
 
     do {
       try device.lockForConfiguration()
@@ -70,15 +70,21 @@ extension CameraSession {
 
     // Reset Focus to continuous/auto
     if device.isFocusPointOfInterestSupported {
+      device.focusPointOfInterest = CGPoint(x: 0.5, y: 0.5)
       device.focusMode = .continuousAutoFocus
     }
 
     // Reset Exposure to continuous/auto
     if device.isExposurePointOfInterestSupported {
+      device.exposurePointOfInterest = CGPoint(x: 0.5, y: 0.5)
       device.exposureMode = .continuousAutoExposure
     }
 
     // Disable listeners
     device.isSubjectAreaChangeMonitoringEnabled = false
+    // Remove any existing listeners
+    NotificationCenter.default.removeObserver(self,
+                                              name: NSNotification.Name.AVCaptureDeviceSubjectAreaDidChange,
+                                              object: nil)
   }
 }

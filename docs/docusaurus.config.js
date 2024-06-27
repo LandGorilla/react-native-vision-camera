@@ -1,3 +1,5 @@
+const { themes } = require('prism-react-renderer')
+
 module.exports = {
   title: 'VisionCamera',
   tagline: '📸 A powerful, high-performance React Native Camera library.',
@@ -8,7 +10,44 @@ module.exports = {
   favicon: '/favicon.ico',
   organizationName: 'mrousavy',
   projectName: 'react-native-vision-camera',
+  markdown: {
+    mermaid: true,
+  },
+  themes: ['@docusaurus/theme-mermaid'],
   themeConfig: {
+    /**
+     * @type {import('@docusaurus/theme-mermaid').ThemeConfig['mermaid']}
+     */
+    mermaid: {
+      options: {
+        themeVariables: {
+          git0: '#ffffff00',
+          gitBranchLabel0: '#ffffff00',
+          git1: '#ADD8E6',
+          gitBranchLabel1: '#ffffff',
+          git2: '#ACC8E6',
+          gitBranchLabel2: '#ffffff',
+          commitLabelColor: '#000000',
+          commitLabelBackground: '#ffffff00',
+          commitLabelFontSize: 24
+        },
+        fontSize: 40,
+        gantt: {
+          sectionFontSize: 40,
+          fontSize: 40,
+          barGap: 15,
+          topPadding: 15,
+          leftPadding: 400,
+          barHeight: 90
+        },
+        gitGraph: {
+          showBranches: true,
+          rotateCommitLabel: false,
+          parallelCommits: false,
+          mainBranchName: 'Time'
+        }
+      },
+    },
     algolia: {
       appId: 'NRK7PZXU6O',
       apiKey: '33d54e627c4587a6d8dbff79d5209e46',
@@ -19,9 +58,17 @@ module.exports = {
       respectPrefersColorScheme: true
     },
     prism: {
-      theme: require('prism-react-renderer/themes/github'),
-      darkTheme: require('prism-react-renderer/themes/palenight'),
-      additionalLanguages: ['swift', 'java', 'kotlin'],
+      theme: themes.github,
+      darkTheme: themes.palenight,
+      additionalLanguages: [
+        'bash',
+        'json',
+        'kotlin',
+        'ruby',
+        'cmake',
+        'groovy',
+        'java',
+      ],
     },
     announcementBar: {
       id: 'shadowlens',
@@ -50,6 +97,11 @@ module.exports = {
         {
           href: 'https://github.com/mrousavy/react-native-vision-camera/tree/main/package/example',
           label: 'Example App',
+          position: 'left'
+        },
+        {
+          href: 'https://mrousavy.com/projects/shadowlens',
+          label: 'ShadowLens',
           position: 'left'
         },
         {
