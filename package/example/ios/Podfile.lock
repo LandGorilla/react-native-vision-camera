@@ -1391,16 +1391,16 @@ PODS:
     - ReactCommon/turbomodule/core
     - Yoga
   - SocketRocket (0.7.0)
-  - VisionCamera (4.3.3):
-    - VisionCamera/Core (= 4.3.3)
-    - VisionCamera/FrameProcessors (= 4.3.3)
-    - VisionCamera/React (= 4.3.3)
-  - VisionCamera/Core (4.3.3)
-  - VisionCamera/FrameProcessors (4.3.3):
+  - VisionCamera (4.3.4):
+    - VisionCamera/Core (= 4.3.4)
+    - VisionCamera/FrameProcessors (= 4.3.4)
+    - VisionCamera/React (= 4.3.4)
+  - VisionCamera/Core (4.3.4)
+  - VisionCamera/FrameProcessors (4.3.4):
     - React
     - React-callinvoker
     - react-native-worklets-core
-  - VisionCamera/React (4.3.3):
+  - VisionCamera/React (4.3.4):
     - React-Core
     - VisionCamera/FrameProcessors
   - Yoga (0.0.0)

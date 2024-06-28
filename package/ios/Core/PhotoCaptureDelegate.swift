@@ -56,8 +56,7 @@ class PhotoCaptureDelegate: GlobalReferenceHolder, AVCapturePhotoCaptureDelegate
           promise.reject(error: .capture(.imageDataAccessError))
         return
       }
-      let transformedimage = image.transformedImage(interfaceOrientation: currentOrientation)
-      let path = try FileUtils.writeUIImageToTempFile(image: transformedimage)
+      let path = try FileUtils.writeUIImageToTempFile(image: image)
 
       let exif = photo.metadata["{Exif}"] as? [String: Any]
       let width = exif?["PixelXDimension"]
