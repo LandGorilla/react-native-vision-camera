@@ -85,8 +85,7 @@ extension CameraSession {
       let photoCaptureDelegate = PhotoCaptureDelegate(promise: promise,
                                                       enableShutterSound: enableShutterSound,
                                                       metadataProvider: self.metadataProvider,
-                                                      cameraSessionDelegate: self.delegate,
-                                                      currentOrientation: self.currentOrientation)
+                                                      cameraSessionDelegate: self.delegate)
       photoOutput.capturePhoto(with: photoSettings, delegate: photoCaptureDelegate)
 
       // Assume that `takePhoto` is always called with the same parameters, so prepare the next call too.

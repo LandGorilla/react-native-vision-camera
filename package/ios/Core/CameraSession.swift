@@ -34,8 +34,6 @@ class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
   var recordingSession: RecordingSession?
   var didCancelRecording = false
   var orientationManager = OrientationManager()
-  let coreMotion: CMMotionManager
-  var currentOrientation: UIInterfaceOrientation = .portrait
 
   // Callbacks
   weak var delegate: CameraSessionDelegate?
@@ -53,21 +51,7 @@ class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
    The `onError` callback is used for any runtime errors.
    */
   override init() {
-    coreMotion = CMMotionManager()
     super.init()
-    coreMotion.accelerometerUpdateInterval = 0.2
-    //  Using main queue is not recommended. So create new operation queue and pass it to startAccelerometerUpdatesToQueue.
-    //  Dispatch U/I code to main thread using dispach_async in the handler.
-    coreMotion.startAccelerometerUpdates( to: OperationQueue() ) { [ weak self] data, _ in
-      if let data = data {
-          DispatchQueue.main.async {
-              self?.currentOrientation = abs( data.acceleration.y ) < abs( data.acceleration.x )
-                                         ?   data.acceleration.x > 0 ? .landscapeRight : .landscapeLeft
-                                         :   data.acceleration.y > 0 ? .portraitUpsideDown : .portrait
-          }
-      }
-    }
-
     orientationManager.delegate = self
     NotificationCenter.default.addObserver(self,
                                            selector: #selector(sessionRuntimeError),
@@ -84,7 +68,6 @@ class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
   }
 
   deinit {
-    coreMotion.stopAccelerometerUpdates()
     NotificationCenter.default.removeObserver(self,
                                               name: .AVCaptureSessionRuntimeError,
                                               object: captureSession)
