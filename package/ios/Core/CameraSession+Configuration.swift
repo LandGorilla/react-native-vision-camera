@@ -10,6 +10,17 @@ import AVFoundation
 import Foundation
 
 extension CameraSession {
+    
+    func getCameraDevice(cameraId: String) -> AVCaptureDevice? {
+        // Attempt to get the default device for the built-in dual camera
+        if let dualCamera = AVCaptureDevice.default(.builtInDualCamera, for: .video, position: .back) {
+            return dualCamera
+        } else {
+            // Fallback to creating an AVCaptureDevice with a specific unique ID
+            return AVCaptureDevice(uniqueID: cameraId)
+        }
+    }
+    
   // pragma MARK: Input Device
 
   /**
@@ -35,7 +46,7 @@ extension CameraSession {
 
     VisionLogger.log(level: .info, message: "Configuring Camera \(cameraId)...")
     // Video Input (Camera Device/Sensor)
-    guard let videoDevice = AVCaptureDevice(uniqueID: cameraId) else {
+    guard let videoDevice = getCameraDevice(cameraId: cameraId) else {
       throw CameraError.device(.invalid)
     }
     let input = try AVCaptureDeviceInput(device: videoDevice)
