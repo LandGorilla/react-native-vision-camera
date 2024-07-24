@@ -13,7 +13,7 @@ extension CameraSession {
     
     func getCameraDevice(cameraId: String) -> AVCaptureDevice? {
         // Attempt to get the default device for the built-in dual camera
-        if let dualCamera = AVCaptureDevice.default(.builtInDualCamera, for: .video, position: .back) {
+        if let dualCamera = AVCaptureDevice.default(.builtInDualWideCamera, for: .video, position: .back) {
             return dualCamera
         } else {
             // Fallback to creating an AVCaptureDevice with a specific unique ID
