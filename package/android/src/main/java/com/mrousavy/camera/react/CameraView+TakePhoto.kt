@@ -32,6 +32,7 @@ suspend fun CameraView.takePhoto(optionsMap: ReadableMap): WritableMap {
   map.putString("orientation", photo.orientation.unionValue)
   map.putBoolean("isRawPhoto", false)
   map.putBoolean("isMirrored", photo.isMirrored)
+  photo.depthVariance?.let { map.putDouble("depth_variance", it) }
 
   return map
 }

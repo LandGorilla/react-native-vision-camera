@@ -3,6 +3,7 @@ package com.mrousavy.camera.core
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.util.Log
 import androidx.annotation.MainThread
@@ -43,6 +44,7 @@ class CameraSession(internal val context: Context, internal val callback: Callba
   internal var configuration: CameraConfiguration? = null
   internal val cameraProvider = ProcessCameraProvider.getInstance(context)
   internal var camera: Camera? = null
+  internal var camera2: CameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
   // Camera Outputs
   internal var previewOutput: Preview? = null
