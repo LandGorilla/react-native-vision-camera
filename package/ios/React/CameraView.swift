@@ -28,6 +28,7 @@ public final class CameraView: UIView, CameraSessionDelegate, PreviewViewDelegat
   @objc var enableDepthData = false
   @objc var enablePortraitEffectsMatteDelivery = false
   @objc var enableBufferCompression = false
+  @objc var isMirrored = false
 
   // use cases
   @objc var photo = false
@@ -45,12 +46,15 @@ public final class CameraView: UIView, CameraSessionDelegate, PreviewViewDelegat
 
   // props that require format reconfiguring
   @objc var format: NSDictionary?
-  @objc var fps: NSNumber?
+  @objc var minFps: NSNumber?
+  @objc var maxFps: NSNumber?
   @objc var videoHdr = false
   @objc var photoHdr = false
   @objc var photoQualityBalance: NSString?
   @objc var lowLightBoost = false
   @objc var outputOrientation: NSString?
+  @objc var videoBitRateOverride: NSNumber?
+  @objc var videoBitRateMultiplier: NSNumber?
 
   // other props
   @objc var isActive = false
@@ -105,7 +109,7 @@ public final class CameraView: UIView, CameraSessionDelegate, PreviewViewDelegat
   var pinchScaleOffset: CGFloat = 1.0
 
   // CameraView+TakeSnapshot
-  var latestVideoFrame: CMSampleBuffer?
+  var latestVideoFrame: Snapshot?
 
   // pragma MARK: Setup
 
@@ -191,6 +195,7 @@ public final class CameraView: UIView, CameraSessionDelegate, PreviewViewDelegat
 
       // Input Camera Device
       config.cameraId = cameraId as? String
+      config.isMirrored = isMirrored
 
       // Photo
       if photo {
@@ -254,7 +259,8 @@ public final class CameraView: UIView, CameraSessionDelegate, PreviewViewDelegat
       }
 
       // Side-Props
-      config.fps = fps?.int32Value
+      config.minFps = minFps?.int32Value
+      config.maxFps = maxFps?.int32Value
       config.enableLowLightBoost = lowLightBoost
       config.torch = try Torch(jsValue: torch)
 
@@ -356,9 +362,9 @@ public final class CameraView: UIView, CameraSessionDelegate, PreviewViewDelegat
     ])
   }
 
-  func onFrame(sampleBuffer: CMSampleBuffer, orientation: Orientation) {
+  func onFrame(sampleBuffer: CMSampleBuffer, orientation: Orientation, isMirrored: Bool) {
     // Update latest frame that can be used for snapshot capture
-    latestVideoFrame = sampleBuffer
+    latestVideoFrame = Snapshot(imageBuffer: sampleBuffer, orientation: orientation)
 
     // Notify FPS Collector that we just had a Frame
     fpsSampleCollector.onTick()
@@ -366,7 +372,9 @@ public final class CameraView: UIView, CameraSessionDelegate, PreviewViewDelegat
     #if VISION_CAMERA_ENABLE_FRAME_PROCESSORS
       if let frameProcessor = frameProcessor {
         // Call Frame Processor
-        let frame = Frame(buffer: sampleBuffer, orientation: orientation.imageOrientation)
+        let frame = Frame(buffer: sampleBuffer,
+                          orientation: orientation.imageOrientation,
+                          isMirrored: isMirrored)
         frameProcessor.call(frame)
       }
     #endif

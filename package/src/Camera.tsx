@@ -30,10 +30,7 @@ import { RotationHelper } from './RotationHelper'
 export type CameraPermissionStatus = 'granted' | 'not-determined' | 'denied' | 'restricted'
 export type CameraPermissionRequestResult = 'granted' | 'denied'
 
-type NativeRecordVideoOptions = Omit<RecordVideoOptions, 'onRecordingError' | 'onRecordingFinished' | 'videoBitRate'> & {
-  videoBitRateOverride?: number
-  videoBitRateMultiplier?: number
-}
+type NativeRecordVideoOptions = Omit<RecordVideoOptions, 'onRecordingError' | 'onRecordingFinished'>
 type RefType = React.Component<NativeCameraViewProps> & Readonly<NativeMethods>
 interface CameraState {
   isRecordingWithFlash: boolean
@@ -53,8 +50,12 @@ function isSkiaFrameProcessor(frameProcessor?: ReadonlyFrameProcessor | Drawable
  *
  * The `<Camera>` component's most important properties are:
  *
- * * {@linkcode CameraProps.device | device}: Specifies the {@linkcode CameraDevice} to use. Get a {@linkcode CameraDevice} by using the {@linkcode useCameraDevice | useCameraDevice(..)} hook, or manually by using the {@linkcode CameraDevices.getAvailableCameraDevices CameraDevices.getAvailableCameraDevices()} function.
- * * {@linkcode CameraProps.isActive | isActive}: A boolean value that specifies whether the Camera should actively stream video frames or not. This can be compared to a Video component, where `isActive` specifies whether the video is paused or not. If you fully unmount the `<Camera>` component instead of using `isActive={false}`, the Camera will take a bit longer to start again.
+ * * {@linkcode CameraProps.device | device}: Specifies the {@linkcode CameraDevice} to use. Get a {@linkcode CameraDevice} by using
+ * the {@linkcode useCameraDevice | useCameraDevice(..)} hook, or manually by using
+ * the {@linkcode CameraDevices.getAvailableCameraDevices | CameraDevices.getAvailableCameraDevices()} function.
+ * * {@linkcode CameraProps.isActive | isActive}: A boolean value that specifies whether the Camera should
+ * actively stream video frames or not. This can be compared to a Video component, where `isActive` specifies whether the video
+ * is paused or not. If you fully unmount the `<Camera>` component instead of using `isActive={false}`, the Camera will take a bit longer to start again.
  *
  * @example
  * ```tsx
@@ -166,7 +167,7 @@ export class Camera extends React.PureComponent<CameraProps, CameraState> {
     }
   }
 
-  private getBitRateMultiplier(bitRate: RecordVideoOptions['videoBitRate']): number {
+  private getBitRateMultiplier(bitRate: CameraProps['videoBitRate']): number {
     if (typeof bitRate === 'number' || bitRate == null) return 1
     switch (bitRate) {
       case 'extra-low':
@@ -200,7 +201,7 @@ export class Camera extends React.PureComponent<CameraProps, CameraState> {
    * ```
    */
   public startRecording(options: RecordVideoOptions): void {
-    const { onRecordingError, onRecordingFinished, videoBitRate, ...passThruOptions } = options
+    const { onRecordingError, onRecordingFinished, ...passThruOptions } = options
     if (typeof onRecordingError !== 'function' || typeof onRecordingFinished !== 'function')
       throw new CameraRuntimeError('parameter/invalid-parameter', 'The onRecordingError or onRecordingFinished functions were not set!')
 
@@ -209,15 +210,6 @@ export class Camera extends React.PureComponent<CameraProps, CameraState> {
       this.setState({
         isRecordingWithFlash: true,
       })
-    }
-
-    const nativeOptions: NativeRecordVideoOptions = passThruOptions
-    if (typeof videoBitRate === 'number') {
-      // If the user passed an absolute number as a bit-rate, we just use this as a full override.
-      nativeOptions.videoBitRateOverride = videoBitRate
-    } else if (typeof videoBitRate === 'string' && videoBitRate !== 'normal') {
-      // If the user passed 'low'/'normal'/'high', we need to apply this as a multiplier to the native bitrate instead of absolutely setting it
-      nativeOptions.videoBitRateMultiplier = this.getBitRateMultiplier(videoBitRate)
     }
 
     const onRecordCallback = (video?: VideoFile, error?: CameraCaptureError): void => {
@@ -231,9 +223,11 @@ export class Camera extends React.PureComponent<CameraProps, CameraState> {
       if (error != null) return onRecordingError(error)
       if (video != null) return onRecordingFinished(video)
     }
+
+    const nativeRecordVideoOptions: NativeRecordVideoOptions = passThruOptions
     try {
       // TODO: Use TurboModules to make this awaitable.
-      CameraModule.startRecording(this.handle, nativeOptions, onRecordCallback)
+      CameraModule.startRecording(this.handle, nativeRecordVideoOptions, onRecordCallback)
     } catch (e) {
       throw tryParseNativeCameraError(e)
     }
@@ -549,6 +543,11 @@ export class Camera extends React.PureComponent<CameraProps, CameraState> {
     this.rotationHelper.previewOrientation = previewOrientation
     this.props.onPreviewOrientationChanged?.(previewOrientation)
     this.maybeUpdateUIRotation()
+
+    if (isSkiaFrameProcessor(this.props.frameProcessor)) {
+      // If we have a Skia Frame Processor, we need to update it's orientation so it knows how to render.
+      this.props.frameProcessor.previewOrientation.value = previewOrientation
+    }
   }
 
   private maybeUpdateUIRotation(): void {
@@ -617,7 +616,7 @@ export class Camera extends React.PureComponent<CameraProps, CameraState> {
   /** @internal */
   public render(): React.ReactNode {
     // We remove the big `device` object from the props because we only need to pass `cameraId` to native.
-    const { device, frameProcessor, codeScanner, enableFpsGraph, ...props } = this.props
+    const { device, frameProcessor, codeScanner, enableFpsGraph, fps, videoBitRate, ...props } = this.props
 
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (device == null) {
@@ -630,6 +629,22 @@ export class Camera extends React.PureComponent<CameraProps, CameraState> {
     const shouldEnableBufferCompression = props.video === true && frameProcessor == null
     const torch = this.state.isRecordingWithFlash ? 'on' : props.torch
     const isRenderingWithSkia = isSkiaFrameProcessor(frameProcessor)
+    const shouldBeMirrored = device.position === 'front'
+
+    // minFps/maxFps is either the fixed `fps` value, or a value from the [min, max] tuple
+    const minFps = fps == null ? undefined : typeof fps === 'number' ? fps : fps[0]
+    const maxFps = fps == null ? undefined : typeof fps === 'number' ? fps : fps[1]
+
+    // bitrate is number (override) or string (multiplier)
+    let bitRateMultiplier: number | undefined
+    let bitRateOverride: number | undefined
+    if (typeof videoBitRate === 'number') {
+      // If the user passed an absolute number as a bit-rate, we just use this as a full override.
+      bitRateOverride = videoBitRate
+    } else if (typeof videoBitRate === 'string' && videoBitRate !== 'normal') {
+      // If the user passed 'low'/'normal'/'high', we need to apply this as a multiplier to the native bitrate instead of absolutely setting it
+      bitRateMultiplier = this.getBitRateMultiplier(videoBitRate)
+    }
 
     return (
       <NativeCameraView
@@ -637,6 +652,9 @@ export class Camera extends React.PureComponent<CameraProps, CameraState> {
         cameraId={device.id}
         ref={this.ref}
         torch={torch}
+        minFps={minFps}
+        maxFps={maxFps}
+        isMirrored={props.isMirrored ?? shouldBeMirrored}
         onViewReady={this.onViewReady}
         onAverageFpsChanged={enableFpsGraph ? this.onAverageFpsChanged : undefined}
         onInitialized={this.onInitialized}
@@ -646,13 +664,15 @@ export class Camera extends React.PureComponent<CameraProps, CameraState> {
         onPreviewStarted={this.onPreviewStarted}
         onPreviewStopped={this.onPreviewStopped}
         onShutter={this.onShutter}
+        videoBitRateMultiplier={bitRateMultiplier}
+        videoBitRateOverride={bitRateOverride}
         onOutputOrientationChanged={this.onOutputOrientationChanged}
         onPreviewOrientationChanged={this.onPreviewOrientationChanged}
         onError={this.onError}
         codeScannerOptions={codeScanner}
         enableFrameProcessor={frameProcessor != null}
         enableBufferCompression={props.enableBufferCompression ?? shouldEnableBufferCompression}
-        preview={isRenderingWithSkia ? false : props.preview ?? true}>
+        preview={isRenderingWithSkia ? false : (props.preview ?? true)}>
         {isRenderingWithSkia && (
           <SkiaCameraCanvas
             style={styles.customPreviewView}

@@ -14,21 +14,30 @@ import CoreImage
 // MARK: - PhotoCaptureDelegate
 
 class PhotoCaptureDelegate: GlobalReferenceHolder, AVCapturePhotoCaptureDelegate {
-    private let promise: Promise
-    private let enableShutterSound: Bool
-    private let cameraSessionDelegate: CameraSessionDelegate?
-    private let metadataProvider: MetadataProvider
-    
-    required init(promise: Promise,
-                  enableShutterSound: Bool,
-                  metadataProvider: MetadataProvider,
-                  cameraSessionDelegate: CameraSessionDelegate?) {
-        self.promise = promise
-        self.enableShutterSound = enableShutterSound
-        self.metadataProvider = metadataProvider
-        self.cameraSessionDelegate = cameraSessionDelegate
-        super.init()
-        makeGlobal()
+  private let promise: Promise
+  private let enableShutterSound: Bool
+  private let cameraSessionDelegate: CameraSessionDelegate?
+  private let metadataProvider: MetadataProvider
+  private let path: URL
+
+  required init(promise: Promise,
+                enableShutterSound: Bool,
+                metadataProvider: MetadataProvider,
+                path: URL,
+                cameraSessionDelegate: CameraSessionDelegate?) {
+    self.promise = promise
+    self.enableShutterSound = enableShutterSound
+    self.metadataProvider = metadataProvider
+    self.path = path
+    self.cameraSessionDelegate = cameraSessionDelegate
+    super.init()
+    makeGlobal()
+  }
+
+  func photoOutput(_: AVCapturePhotoOutput, willCapturePhotoFor _: AVCaptureResolvedPhotoSettings) {
+    if !enableShutterSound {
+      // disable system shutter sound (see https://stackoverflow.com/a/55235949/5281431)
+      AudioServicesDisposeSystemSoundID(1108)
     }
     
     func photoOutput(_: AVCapturePhotoOutput, willCapturePhotoFor _: AVCaptureResolvedPhotoSettings) {

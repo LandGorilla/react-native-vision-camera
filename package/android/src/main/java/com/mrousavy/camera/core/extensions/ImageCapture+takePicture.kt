@@ -1,7 +1,6 @@
 package com.mrousavy.camera.core.extensions
 
 import android.annotation.SuppressLint
-import android.content.Context
 import android.media.MediaActionSound
 import android.util.Log
 import androidx.camera.core.ImageCapture
@@ -10,7 +9,7 @@ import androidx.camera.core.ImageCaptureException
 import com.mrousavy.camera.core.CameraSession
 import com.mrousavy.camera.core.MetadataProvider
 import com.mrousavy.camera.core.types.ShutterType
-import com.mrousavy.camera.core.utils.FileUtils
+import java.io.File
 import java.net.URI
 import java.util.concurrent.Executor
 import kotlin.coroutines.resume
@@ -21,7 +20,8 @@ data class PhotoFileInfo(val uri: URI, val metadata: ImageCapture.Metadata)
 
 @SuppressLint("RestrictedApi")
 suspend inline fun ImageCapture.takePicture(
-  context: Context,
+  file: File,
+  isMirrored: Boolean,
   enableShutterSound: Boolean,
   metadataProvider: MetadataProvider,
   callback: CameraSession.Callback,
@@ -32,18 +32,19 @@ suspend inline fun ImageCapture.takePicture(
     val shutterSound = if (enableShutterSound) MediaActionSound() else null
     shutterSound?.load(MediaActionSound.SHUTTER_CLICK)
 
-    val file = FileUtils.createTempFile(context, ".jpg")
+    // Create output file
     val outputFileOptionsBuilder = OutputFileOptions.Builder(file).also { options ->
       val metadata = ImageCapture.Metadata()
       metadataProvider.location?.let { location ->
         Log.i("ImageCapture", "Setting Photo Location to ${location.latitude}, ${location.longitude}...")
         metadata.location = metadataProvider.location
       }
-      metadata.isReversedHorizontal = camera?.isFrontFacing == true
+      metadata.isReversedHorizontal = isMirrored
       options.setMetadata(metadata)
     }
     val outputFileOptions = outputFileOptionsBuilder.build()
 
+    // Take a photo with callbacks
     takePicture(
       outputFileOptions,
       executor,

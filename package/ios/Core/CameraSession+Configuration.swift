@@ -94,15 +94,15 @@ extension CameraSession {
         let qualityPrioritization = AVCapturePhotoOutput.QualityPrioritization(fromQualityBalance: photo.qualityBalance)
         photoOutput.maxPhotoQualityPrioritization = qualityPrioritization
       }
+      if photoOutput.isDepthDataDeliverySupported {
+        photoOutput.isDepthDataDeliveryEnabled = photo.enableDepthData
+      }
+      if photoOutput.isPortraitEffectsMatteDeliverySupported {
+        photoOutput.isPortraitEffectsMatteDeliveryEnabled = photo.enablePortraitEffectsMatte
+      }
+      photoOutput.isMirrored = configuration.isMirrored
       // TODO: Enable isResponsiveCaptureEnabled? (iOS 17+)
       // TODO: Enable isFastCapturePrioritizationEnabled? (iOS 17+)
-      if photo.enableDepthData {
-        photoOutput.isDepthDataDeliveryEnabled = photoOutput.isDepthDataDeliverySupported
-      }
-      if #available(iOS 12.0, *), photo.enablePortraitEffectsMatte {
-        photoOutput.isPortraitEffectsMatteDeliveryEnabled = photoOutput.isPortraitEffectsMatteDeliverySupported
-      }
-      photoOutput.isMirrored = isMirrored
 
       self.photoOutput = photoOutput
     }
@@ -121,11 +121,14 @@ extension CameraSession {
       // 2. Configure
       videoOutput.setSampleBufferDelegate(self, queue: CameraQueues.videoQueue)
       videoOutput.alwaysDiscardsLateVideoFrames = true
-      if isMirrored {
-        // rotate by 180 deg and mirror the selfie camera so it behaves like the back camera.
-        // we later need to flip it alongside the horizontal axis when recording videos with it.
-        videoOutput.orientation = videoOutput.orientation.flipped()
-        videoOutput.isMirrored = isMirrored
+      if configuration.isMirrored {
+        // 2.1. If mirroring is enabled, mirror all connections along the vertical axis
+        videoOutput.isMirrored = true
+        if videoOutput.orientation.isLandscape {
+          // 2.2. If we have a landscape orientation, we need to flip it to counter the mirroring on the wrong axis.
+          videoOutput.orientation = videoOutput.orientation.flipped()
+          VisionLogger.log(level: .info, message: "AVCaptureVideoDataOutput will rotate Frames to \(videoOutput.orientation)...")
+        }
       }
 
       self.videoOutput = videoOutput
@@ -257,20 +260,21 @@ extension CameraSession {
    */
   func configureSideProps(configuration: CameraConfiguration, device: AVCaptureDevice) throws {
     // Configure FPS
-    if let fps = configuration.fps {
-      let supportsGivenFps = device.activeFormat.videoSupportedFrameRateRanges.contains { range in
-        return range.includes(fps: Double(fps))
+    if let minFps = configuration.minFps,
+       let maxFps = configuration.maxFps {
+      let fpsRanges = device.activeFormat.videoSupportedFrameRateRanges
+      if !fpsRanges.contains(where: { $0.minFrameRate <= Double(minFps) }) {
+        throw CameraError.format(.invalidFps(fps: Int(minFps)))
       }
-      if !supportsGivenFps {
-        throw CameraError.format(.invalidFps(fps: Int(fps)))
+      if !fpsRanges.contains(where: { $0.maxFrameRate >= Double(maxFps) }) {
+        throw CameraError.format(.invalidFps(fps: Int(maxFps)))
       }
 
-      let minFps = configuration.enableLowLightBoost ? fps / 2 : fps
-      device.activeVideoMinFrameDuration = CMTimeMake(value: 1, timescale: fps)
       device.activeVideoMaxFrameDuration = CMTimeMake(value: 1, timescale: minFps)
+      device.activeVideoMinFrameDuration = CMTimeMake(value: 1, timescale: maxFps)
     } else {
-      device.activeVideoMinFrameDuration = CMTime.invalid
       device.activeVideoMaxFrameDuration = CMTime.invalid
+      device.activeVideoMinFrameDuration = CMTime.invalid
     }
 
     // Configure Low-Light-Boost

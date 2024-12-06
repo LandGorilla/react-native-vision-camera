@@ -86,6 +86,7 @@ class CameraSession(internal val context: Context, internal val callback: Callba
   override fun close() {
     Log.i(TAG, "Closing CameraSession...")
     isDestroyed = true
+    orientationManager.stopOrientationUpdates()
     runOnUiThread {
       lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
     }
@@ -138,7 +139,7 @@ class CameraSession(internal val context: Context, internal val callback: Callba
           // 1.1. whenever the outputs changed, we need to update their orientation as well
           configureOrientation()
         }
-        if (diff.deviceChanged || diff.outputsChanged) {
+        if (diff.deviceChanged) {
           // 2. input or outputs changed, or the session was destroyed from outside, rebind the session
           configureCamera(provider, config)
         }
@@ -195,14 +196,14 @@ class CameraSession(internal val context: Context, internal val callback: Callba
     // Preview Orientation
     orientationManager.previewOrientation.toSurfaceRotation().let { previewRotation ->
       previewOutput?.targetRotation = previewRotation
+      codeScannerOutput?.targetRotation = previewRotation
     }
     // Outputs Orientation
     orientationManager.outputOrientation.toSurfaceRotation().let { outputRotation ->
       photoOutput?.targetRotation = outputRotation
       videoOutput?.targetRotation = outputRotation
-      frameProcessorOutput?.targetRotation = outputRotation
-      codeScannerOutput?.targetRotation = outputRotation
     }
+    // Frame Processor output will not receive a target rotation, user is responsible for rotating himself
   }
 
   interface Callback {

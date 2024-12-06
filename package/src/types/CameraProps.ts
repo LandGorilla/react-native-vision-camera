@@ -16,6 +16,7 @@ export interface DrawableFrameProcessor {
   frameProcessor: (frame: Frame) => void
   type: 'drawable-skia'
   offscreenTextures: ISharedValue<SkImage[]>
+  previewOrientation: ISharedValue<Orientation>
 }
 
 export interface OnShutterEvent {
@@ -183,17 +184,39 @@ export interface CameraProps extends ViewProps {
    */
   androidPreviewViewType?: 'surface-view' | 'texture-view'
   /**
-   * Specify the frames per second this camera should stream frames at.
+   * Specify a the number of frames per second this camera should stream frames at.
+   *
+   * - If `fps` is a single number, the Camera will be streaming at a fixed FPS value.
+   * - If `fps` is a tuple/array, the Camera will be free to choose a FPS value between `minFps` and `maxFps`,
+   * depending on current lighting conditions. Allowing a lower `minFps` value can result in better photos
+   * and videos, as the Camera can take more time to properly receive light for frames.
    *
    * Make sure the given {@linkcode format} can stream at the target {@linkcode fps} value (see {@linkcode CameraDeviceFormat.minFps format.minFps} and {@linkcode CameraDeviceFormat.maxFps format.maxFps}).
    */
-  fps?: number
+  fps?: number | [minFps: number, maxFps: number]
   /**
    * Enables or disables HDR Video Streaming for Preview, Video and Frame Processor via a 10-bit wide-color pixel format.
    *
    * Make sure the given {@linkcode format} supports HDR (see {@linkcode CameraDeviceFormat.supportsVideoHdr format.supportsVideoHdr}).
    */
   videoHdr?: boolean
+  /**
+   * The bit-rate for encoding the video into a file, in Mbps (Megabits per second).
+   *
+   * Bit-rate is dependant on various factors such as resolution, FPS, pixel format (whether it's 10 bit HDR or not), and video codec.
+   *
+   * By default, it will be calculated by the hardware encoder, which takes all those factors into account.
+   *
+   * * `extra-low`: 40% lower than whatever the hardware encoder recommends.
+   * * `low`: 20% lower than whatever the hardware encoder recommends.
+   * * `normal`: The recommended value by the hardware encoder.
+   * * `high`: 20% higher than whatever the hardware encoder recommends.
+   * * `extra-high`: 40% higher than whatever the hardware encoder recommends.
+   * * `number`: Any custom number for the bit-rate, in Mbps.
+   *
+   * @default 'normal'
+   */
+  videoBitRate?: 'extra-low' | 'low' | 'normal' | 'high' | 'extra-high' | number
   /**
    * Enables or disables HDR Photo Capture via a double capture routine that combines low- and high exposure photos.
    *
@@ -281,10 +304,6 @@ export interface CameraProps extends ViewProps {
    *
    * - `'preview'`: Use the same orientation as the preview view. If the device rotation is locked, the user cannot take photos or videos in different orientations.
    * - `'device'`: Use whatever orientation the device is held in, even if the preview view is not rotated to that orientation. If the device rotation is locked, the user can still rotate his phone to take photos or videos in different orientations than the preview view.
-   * - `'portrait'`: Force-rotate to **0°** (home-button at the bottom)
-   * - `'landscape-left'`: Force-rotate to **90°** (home-button on the left)
-   * - `'portrait-upside-down'`: Force-rotate to **180°** (home-button at the top)
-   * - `'landscape-right'`: Force-rotate to **270°** (home-button on the right)
    *
    * @note Preview orientation will not be affected by this property, as it is always dependant on screen orientation
    * @note Frame Processors will not be affected by this property, as their buffer size (respective to {@linkcode Frame.orientation}) is always the same
@@ -292,6 +311,15 @@ export interface CameraProps extends ViewProps {
    * @default 'device'
    */
   outputOrientation?: OutputOrientation
+  /**
+   * Enables or disables mirroring of outputs alongside the vertical axis.
+   *
+   * Mirroring only affects the photo-, video-, or snapshot-output, but not preview.
+   * The Preview is always mirrored for front cameras, and not mirrored for back cameras.
+   *
+   * @default false (back camera), true (front camera)
+   */
+  isMirrored?: boolean
 
   //#region Events
   /**

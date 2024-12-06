@@ -12,6 +12,7 @@ import com.mrousavy.camera.core.extensions.id
 import com.mrousavy.camera.core.extensions.takePicture
 import com.mrousavy.camera.core.types.Flash
 import com.mrousavy.camera.core.types.Orientation
+import com.mrousavy.camera.core.types.TakePhotoOptions
 import com.mrousavy.camera.core.utils.FileUtils
 import java.io.File
 import java.io.FileOutputStream
@@ -74,21 +75,34 @@ fun rotateImageIfNeeded(photoFile: File): File {
   return rotatedFile
 }
 
-suspend fun CameraSession.takePhoto(flash: Flash, enableShutterSound: Boolean): Photo {
+suspend fun CameraSession.takePhoto(options: TakePhotoOptions): Photo {
   val camera = camera ?: throw CameraNotReadyError()
   val cameraId = camera.cameraInfo.id ?: "0"
+  val configuration = configuration ?: throw CameraNotReadyError()
+  val photoConfig = configuration.photo as? CameraConfiguration.Output.Enabled<CameraConfiguration.Photo> ?: throw PhotoNotEnabledError()
   val photoOutput = photoOutput ?: throw PhotoNotEnabledError()
 
-  if (flash != Flash.OFF && !camera.cameraInfo.hasFlashUnit()) {
+  // Flash
+  if (options.flash != Flash.OFF && !camera.cameraInfo.hasFlashUnit()) {
     throw FlashUnavailableError()
   }
+  photoOutput.flashMode = options.flash.toFlashMode()
+  // Shutter sound
+  val enableShutterSound = options.enableShutterSound && !audioManager.isSilent
+  // isMirrored (EXIF)
+  val isMirrored = photoConfig.config.isMirrored
 
-  photoOutput.flashMode = flash.toFlashMode()
-  val enableShutterSoundActual = getEnableShutterSoundActual(enableShutterSound)
+  // Shoot photo!
+  val photoFile = photoOutput.takePicture(
+    options.file.file,
+    isMirrored,
+    enableShutterSound,
+    metadataProvider,
+    callback,
+    CameraQueues.cameraExecutor
+  )
 
-  val photoFile = photoOutput.takePicture(context, enableShutterSoundActual, metadataProvider, callback, CameraQueues.cameraExecutor)
-  val isMirrored = photoFile.metadata.isReversedHorizontal
-
+  // Parse resulting photo (EXIF data)
   val size = FileUtils.getImageSize(photoFile.uri.path)
 
   val rotatedPhotoFile = rotateImageIfNeeded(File(photoFile.uri.path))
@@ -98,11 +112,5 @@ suspend fun CameraSession.takePhoto(flash: Flash, enableShutterSound: Boolean): 
   return Photo(rotatedPhotoFile.path, size.width, size.height, Orientation.PORTRAIT, isMirrored, depthVariance)
 }
 
-private fun CameraSession.getEnableShutterSoundActual(enable: Boolean): Boolean {
-  if (enable && audioManager.ringerMode != AudioManager.RINGER_MODE_NORMAL) {
-    Log.i(CameraSession.TAG, "Ringer mode is silent (${audioManager.ringerMode}), disabling shutter sound...")
-    return false
-  }
-
-  return enable
-}
+private val AudioManager.isSilent: Boolean
+  get() = ringerMode != AudioManager.RINGER_MODE_NORMAL
