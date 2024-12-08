@@ -43,6 +43,22 @@ enum FileUtils {
     }
     try writeDataToFile(data: data, file: file)
   }
+    
+    static func writeUIImageToTempFile(image: UIImage, compressionQuality: CGFloat = 1.0) throws -> URL {
+      guard let data = image.jpegData(compressionQuality: compressionQuality) else {
+        throw CameraError.capture(.imageDataAccessError)
+      }
+      let tempURL = createTempFile(fileExtension: "jpeg")
+      try writeDataToFile(data: data, file: tempURL)
+      return tempURL
+    }
+    
+    static func createTempFile(fileExtension: String) -> URL {
+        let filename = UUID().uuidString + "." + fileExtension
+        let tempFilePath = FileManager.default.temporaryDirectory
+            .appendingPathComponent(filename)
+        return tempFilePath
+    }
 
   static var tempDirectory: URL {
     return FileManager.default.temporaryDirectory

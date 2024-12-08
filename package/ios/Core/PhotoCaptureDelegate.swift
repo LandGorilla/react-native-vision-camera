@@ -34,19 +34,12 @@ class PhotoCaptureDelegate: GlobalReferenceHolder, AVCapturePhotoCaptureDelegate
     makeGlobal()
   }
 
-  func photoOutput(_: AVCapturePhotoOutput, willCapturePhotoFor _: AVCaptureResolvedPhotoSettings) {
-    if !enableShutterSound {
-      // disable system shutter sound (see https://stackoverflow.com/a/55235949/5281431)
-      AudioServicesDisposeSystemSoundID(1108)
-    }
-    
     func photoOutput(_: AVCapturePhotoOutput, willCapturePhotoFor _: AVCaptureResolvedPhotoSettings) {
         if !enableShutterSound {
             // disable system shutter sound (see https://stackoverflow.com/a/55235949/5281431)
             AudioServicesDisposeSystemSoundID(1108)
         }
         
-        // onShutter(..) event
         cameraSessionDelegate?.onCaptureShutter(shutterType: .photo)
     }
     
@@ -64,12 +57,7 @@ class PhotoCaptureDelegate: GlobalReferenceHolder, AVCapturePhotoCaptureDelegate
                 promise.reject(error: .capture(.imageDataAccessError))
                 return
             }
-//            guard let resizedImage = image.correctImageOrientation().resizeProportionallySync(to: CGSize(width: 2048, height: 2048)) else {
-//                promise.reject(error: .capture(.imageDataAccessError))
-//                return
-//            }
             let path = try FileUtils.writeUIImageToTempFile(image: image.correctImageOrientation())
-            
             let exif = photo.metadata["{Exif}"] as? [String: Any]
             let width = exif?["PixelXDimension"]
             let height = exif?["PixelYDimension"]
@@ -154,7 +142,7 @@ class PhotoCaptureDelegate: GlobalReferenceHolder, AVCapturePhotoCaptureDelegate
         return sqrt(weightedVariance) // Standard deviation
     }
     
-    private func getOrientation(forExifOrientation exifOrientation: CGImagePropertyOrientation) -> String {
+    func getOrientation(forExifOrientation exifOrientation: CGImagePropertyOrientation) -> String {
         switch exifOrientation {
         case .up, .upMirrored:
             return "portrait"
@@ -169,7 +157,7 @@ class PhotoCaptureDelegate: GlobalReferenceHolder, AVCapturePhotoCaptureDelegate
         }
     }
     
-    private func getIsMirrored(forExifOrientation exifOrientation: CGImagePropertyOrientation) -> Bool {
+    func getIsMirrored(forExifOrientation exifOrientation: CGImagePropertyOrientation) -> Bool {
         switch exifOrientation {
         case .upMirrored, .rightMirrored, .downMirrored, .leftMirrored:
             return true
