@@ -76,7 +76,7 @@ class PhotoCaptureDelegate: GlobalReferenceHolder, AVCapturePhotoCaptureDelegate
                 "metadata": photo.metadata,
                 "thumbnail": photo.embeddedThumbnailPhotoFormat as Any,
             ]
-            if let variance = calculateDepthVariabilityWithWeights(photo: photo) {
+            if let variance = depthStandardDeviation(photo: photo) {
                 response["depth_variance"] = variance
             }
             promise.resolve(response)
@@ -101,45 +101,36 @@ class PhotoCaptureDelegate: GlobalReferenceHolder, AVCapturePhotoCaptureDelegate
         }
     }
     
-    func calculateDepthVariabilityWithWeights(photo: AVCapturePhoto) -> Float? {
-        guard let depthData = photo.depthData else {
-            print("No depth data available.")
+    func depthStandardDeviation(photo: AVCapturePhoto) -> Float? {
+        // 1. Grab and convert the depth map to Float32
+        guard let depthData = photo.depthData?
+                .converting(toDepthDataType: kCVPixelFormatType_DepthFloat32) else {
+            print("No depth data")
             return nil
         }
         
-        let convertedDepthData = depthData.converting(toDepthDataType: kCVPixelFormatType_DepthFloat32)
-        let depthMap = CIImage(cvPixelBuffer: convertedDepthData.depthDataMap)
-        let context = CIContext()
-        let depthMapSize = depthMap.extent.size
+        let buffer = depthData.depthDataMap
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
         
-        // Sample points with weights
-        let weightedPoints: [(point: CGPoint, weight: Float)] = [
-            (CGPoint(x: depthMapSize.width * 0.5, y: depthMapSize.height * 0.5), 3.0), // center with higher weight
-            (CGPoint(x: depthMapSize.width * 0.25, y: depthMapSize.height * 0.25), 1.0), // corners with normal weight
-            (CGPoint(x: depthMapSize.width * 0.75, y: depthMapSize.height * 0.25), 1.0),
-            (CGPoint(x: depthMapSize.width * 0.25, y: depthMapSize.height * 0.75), 1.0),
-            (CGPoint(x: depthMapSize.width * 0.75, y: depthMapSize.height * 0.75), 1.0)
-        ]
+        // 2. Point to the base address as Float32
+        let width  = CVPixelBufferGetWidth(buffer)
+        let height = CVPixelBufferGetHeight(buffer)
+        let count  = width * height
+        guard let base = CVPixelBufferGetBaseAddress(buffer) else { return nil }
+        let ptr = base.assumingMemoryBound(to: Float32.self)
         
-        var totalWeight: Float = 0
-        var weightedSum: Float = 0
-        var depths: [Float] = []
-        for (point, weight) in weightedPoints {
-            var pixelDepth: Float = 0
-            let pointX = Int(point.x)
-            let pointY = Int(point.y)
-            context.render(depthMap, toBitmap: &pixelDepth, rowBytes: 4, bounds: CGRect(x: pointX, y: pointY, width: 1, height: 1), format: .Rf, colorSpace: nil)
-            depths.append(pixelDepth)
-            weightedSum += pixelDepth * weight
-            totalWeight += weight
-        }
+        // 3. Compute mean
+        var mean: Float = 0
+        vDSP_meanv(ptr, 1, &mean, vDSP_Length(count))
         
-        let weightedMean = weightedSum / totalWeight
-        let weightedVariance = weightedPoints.indices.map {
-            weightedPoints[$0].weight * (depths[$0] - weightedMean) * (depths[$0] - weightedMean)
-        }.reduce(0, +) / totalWeight
+        // 4. Compute mean-of-squares
+        var meanOfSquares: Float = 0
+        vDSP_measqv(ptr, 1, &meanOfSquares, vDSP_Length(count))
         
-        return sqrt(weightedVariance) // Standard deviation
+        // 5. σ = sqrt(E[x²] – μ²)
+        let variance = meanOfSquares - mean * mean
+        return variance > 0 ? sqrt(variance) : 0
     }
     
     func getOrientation(forExifOrientation exifOrientation: CGImagePropertyOrientation) -> String {
