@@ -117,7 +117,7 @@ class PhotoCaptureDelegate: GlobalReferenceHolder, AVCapturePhotoCaptureDelegate
         let width  = CVPixelBufferGetWidth(buffer)
         let height = CVPixelBufferGetHeight(buffer)
         let count  = width * height
-        guard let base = CVPixelBufferGetBaseAddress(buffer) else { return nil }
+        guard let base = CVPixelBufferGetBaseAddress(buffer) else { return 0 }
         let ptr = base.assumingMemoryBound(to: Float32.self)
         
         // 3. Compute mean
@@ -130,7 +130,11 @@ class PhotoCaptureDelegate: GlobalReferenceHolder, AVCapturePhotoCaptureDelegate
         
         // 5. σ = sqrt(E[x²] – μ²)
         let variance = meanOfSquares - mean * mean
-        return variance > 0 ? sqrt(variance) : 0
+        let stdDev = variance > 0 ? sqrt(variance) : 0
+            
+        // 6. Round to two decimal places
+        let rounded = (stdDev * 100).rounded() / 100
+        return rounded
     }
     
     func getOrientation(forExifOrientation exifOrientation: CGImagePropertyOrientation) -> String {
