@@ -15,8 +15,9 @@ import UIKit
  A fully-featured Camera Session supporting preview, video, photo, frame processing, and code scanning outputs.
  All changes to the session have to be controlled via the `configure` function.
  */
-class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
+final class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
   // Configuration
+  private var isInitialized = false
   var configuration: CameraConfiguration?
   var currentConfigureCall: DispatchTime = .now()
   // Capture Session
@@ -67,6 +68,14 @@ class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
                                            object: AVAudioSession.sharedInstance)
   }
 
+  private func initialize() {
+    if isInitialized {
+      return
+    }
+    orientationManager.delegate = self
+    isInitialized = true
+  }
+
   deinit {
     NotificationCenter.default.removeObserver(self,
                                               name: .AVCaptureSessionRuntimeError,
@@ -83,9 +92,7 @@ class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
    Creates a PreviewView for the current Capture Session
    */
   func createPreviewView(frame: CGRect) -> PreviewView {
-    let previewView = PreviewView(frame: frame, session: captureSession)
-    orientationManager.setPreviewView(previewView)
-    return previewView
+    return PreviewView(frame: frame, session: captureSession)
   }
 
   func onConfigureError(_ error: Error) {
@@ -105,6 +112,8 @@ class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
    The `configuration` object is a copy of the currently active configuration that can be modified by the caller in the lambda.
    */
   func configure(_ lambda: @escaping (_ configuration: CameraConfiguration) throws -> Void) {
+    initialize()
+
     VisionLogger.log(level: .info, message: "configure { ... }: Waiting for lock...")
 
     // Set up Camera (Video) Capture Session (on camera queue, acts like a lock)
@@ -262,7 +271,7 @@ class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
   public final func captureOutput(_ captureOutput: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
     switch captureOutput {
     case is AVCaptureVideoDataOutput:
-      onVideoFrame(sampleBuffer: sampleBuffer, orientation: connection.orientation)
+      onVideoFrame(sampleBuffer: sampleBuffer, orientation: connection.orientation, isMirrored: connection.isVideoMirrored)
     case is AVCaptureAudioDataOutput:
       onAudioFrame(sampleBuffer: sampleBuffer)
     default:
@@ -270,7 +279,7 @@ class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
     }
   }
 
-  private final func onVideoFrame(sampleBuffer: CMSampleBuffer, orientation: Orientation) {
+  private final func onVideoFrame(sampleBuffer: CMSampleBuffer, orientation: Orientation, isMirrored: Bool) {
     if let recordingSession {
       do {
         // Write the Video Buffer to the .mov/.mp4 file
@@ -284,8 +293,7 @@ class CameraSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVC
 
     if let delegate {
       // Call Frame Processor (delegate) for every Video Frame
-      let relativeBufferOrientation = orientation.relativeTo(orientation: outputOrientation)
-      delegate.onFrame(sampleBuffer: sampleBuffer, orientation: relativeBufferOrientation)
+      delegate.onFrame(sampleBuffer: sampleBuffer, orientation: orientation, isMirrored: isMirrored)
     }
   }
 

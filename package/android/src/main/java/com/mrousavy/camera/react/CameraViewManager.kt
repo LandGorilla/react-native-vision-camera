@@ -29,18 +29,18 @@ class CameraViewManager : ViewGroupManager<CameraView>() {
 
   override fun getExportedCustomDirectEventTypeConstants(): MutableMap<String, Any>? =
     MapBuilder.builder<String, Any>()
-      .put("cameraViewReady", MapBuilder.of("registrationName", "onViewReady"))
-      .put("cameraInitialized", MapBuilder.of("registrationName", "onInitialized"))
-      .put("cameraStarted", MapBuilder.of("registrationName", "onStarted"))
-      .put("cameraStopped", MapBuilder.of("registrationName", "onStopped"))
-      .put("cameraPreviewStarted", MapBuilder.of("registrationName", "onPreviewStarted"))
-      .put("cameraPreviewStopped", MapBuilder.of("registrationName", "onPreviewStopped"))
-      .put("cameraShutter", MapBuilder.of("registrationName", "onShutter"))
-      .put("cameraOutputOrientationChanged", MapBuilder.of("registrationName", "onOutputOrientationChanged"))
-      .put("cameraPreviewOrientationChanged", MapBuilder.of("registrationName", "onPreviewOrientationChanged"))
-      .put("averageFpsChanged", MapBuilder.of("registrationName", "onAverageFpsChanged"))
-      .put("cameraError", MapBuilder.of("registrationName", "onError"))
-      .put("cameraCodeScanned", MapBuilder.of("registrationName", "onCodeScanned"))
+      .put(CameraViewReadyEvent.EVENT_NAME, MapBuilder.of("registrationName", "onViewReady"))
+      .put(CameraInitializedEvent.EVENT_NAME, MapBuilder.of("registrationName", "onInitialized"))
+      .put(CameraStartedEvent.EVENT_NAME, MapBuilder.of("registrationName", "onStarted"))
+      .put(CameraStoppedEvent.EVENT_NAME, MapBuilder.of("registrationName", "onStopped"))
+      .put(CameraShutterEvent.EVENT_NAME, MapBuilder.of("registrationName", "onShutter"))
+      .put(CameraErrorEvent.EVENT_NAME, MapBuilder.of("registrationName", "onError"))
+      .put(CameraCodeScannedEvent.EVENT_NAME, MapBuilder.of("registrationName", "onCodeScanned"))
+      .put(CameraPreviewStartedEvent.EVENT_NAME, MapBuilder.of("registrationName", "onPreviewStarted"))
+      .put(CameraPreviewStoppedEvent.EVENT_NAME, MapBuilder.of("registrationName", "onPreviewStopped"))
+      .put(CameraOutputOrientationChangedEvent.EVENT_NAME, MapBuilder.of("registrationName", "onOutputOrientationChanged"))
+      .put(CameraPreviewOrientationChangedEvent.EVENT_NAME, MapBuilder.of("registrationName", "onPreviewOrientationChanged"))
+      .put(AverageFpsChangedEvent.EVENT_NAME, MapBuilder.of("registrationName", "onAverageFpsChanged"))
       .build()
 
   override fun getName(): String = TAG
@@ -53,6 +53,11 @@ class CameraViewManager : ViewGroupManager<CameraView>() {
   @ReactProp(name = "cameraId")
   fun setCameraId(view: CameraView, cameraId: String) {
     view.cameraId = cameraId
+  }
+
+  @ReactProp(name = "isMirrored")
+  fun setIsMirrored(view: CameraView, isMirrored: Boolean) {
+    view.isMirrored = isMirrored
   }
 
   @ReactProp(name = "preview", defaultBoolean = true)
@@ -153,9 +158,17 @@ class CameraViewManager : ViewGroupManager<CameraView>() {
   // TODO: Change when TurboModules release.
   // We're treating -1 as "null" here, because when I make the fps parameter
   // of type "Int?" the react bridge throws an error.
-  @ReactProp(name = "fps", defaultInt = -1)
-  fun setFps(view: CameraView, fps: Int) {
-    view.fps = if (fps > 0) fps else null
+  @ReactProp(name = "minFps", defaultInt = -1)
+  fun setMinFps(view: CameraView, minFps: Int) {
+    view.minFps = if (minFps > 0) minFps else null
+  }
+
+  // TODO: Change when TurboModules release.
+  // We're treating -1 as "null" here, because when I make the fps parameter
+  // of type "Int?" the react bridge throws an error.
+  @ReactProp(name = "maxFps", defaultInt = -1)
+  fun setMaxFps(view: CameraView, maxFps: Int) {
+    view.maxFps = if (maxFps > 0) maxFps else null
   }
 
   @ReactProp(name = "photoHdr")
@@ -176,6 +189,24 @@ class CameraViewManager : ViewGroupManager<CameraView>() {
   @ReactProp(name = "videoHdr")
   fun setVideoHdr(view: CameraView, videoHdr: Boolean) {
     view.videoHdr = videoHdr
+  }
+
+  @ReactProp(name = "videoBitRateOverride", defaultDouble = -1.0)
+  fun setVideoBitRateOverride(view: CameraView, videoBitRateOverride: Double) {
+    if (videoBitRateOverride != -1.0) {
+      view.videoBitRateOverride = videoBitRateOverride
+    } else {
+      view.videoBitRateOverride = null
+    }
+  }
+
+  @ReactProp(name = "videoBitRateMultiplier", defaultDouble = -1.0)
+  fun setVideoBitRateMultiplier(view: CameraView, videoBitRateMultiplier: Double) {
+    if (videoBitRateMultiplier != -1.0) {
+      view.videoBitRateMultiplier = videoBitRateMultiplier
+    } else {
+      view.videoBitRateMultiplier = null
+    }
   }
 
   @ReactProp(name = "lowLightBoost")

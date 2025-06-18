@@ -6,7 +6,9 @@
 //
 
 import AVFoundation
+import CoreMotion
 import Foundation
+import UIKit
 
 // MARK: - OrientationManagerDelegate
 
@@ -20,95 +22,159 @@ protocol OrientationManagerDelegate: AnyObject {
 /**
  Provides Orientation updates to the consumer.
  The orientation updates are only pushed as long as a [delegate] is set.
+
+ All orientation values are relative to the given input device's native sensor orientation.
+ Whenever the input device changes, make sure to update it using [setInputDevice].
  */
-class OrientationManager: CameraOrientationCoordinatorDelegate {
-  private var orientationCoordinator: CameraOrientationCoordinator?
+final class OrientationManager {
+  // Whether to use device gyro data, or just UI orientation
   private var targetOutputOrientation = OutputOrientation.device
+  // Gyro updates
+  private let motionManager = CMMotionManager()
+  private let operationQueue = OperationQueue()
+  // Last cached orientations
   private var lastPreviewOrientation: Orientation?
   private var lastOutputOrientation: Orientation?
-  private weak var previewLayer: CALayer?
-  private weak var device: AVCaptureDevice?
 
-  weak var delegate: OrientationManagerDelegate?
+  // Orientation listener
+  weak var delegate: OrientationManagerDelegate? {
+    didSet {
+      lastPreviewOrientation = nil
+      lastOutputOrientation = nil
+      maybeUpdateOrientations()
+    }
+  }
+
+  // The orientation of the physical camera sensor
+  private var sensorOrientation: Orientation {
+    didSet {
+      if oldValue != sensorOrientation {
+        VisionLogger.log(level: .debug, message: "Sensor Orientation changed from \(oldValue) -> \(sensorOrientation)")
+        maybeUpdateOrientations()
+      }
+    }
+  }
+
+  // The orientation of the UI
+  private var interfaceOrientation: Orientation {
+    didSet {
+      if oldValue != interfaceOrientation {
+        VisionLogger.log(level: .debug, message: "Interface Orientation changed from \(oldValue) -> \(interfaceOrientation)")
+        maybeUpdateOrientations()
+      }
+    }
+  }
+
+  // The orientation of the physical device's gyro sensor/accelerometer
+  private var deviceOrientation: Orientation {
+    didSet {
+      if oldValue != deviceOrientation {
+        VisionLogger.log(level: .debug, message: "Device Orientation changed from \(oldValue) -> \(deviceOrientation)")
+        maybeUpdateOrientations()
+      }
+    }
+  }
 
   /**
    The orientation of the preview view.
    */
   var previewOrientation: Orientation {
-    guard let orientationCoordinator else {
-      return .portrait
-    }
-    return orientationCoordinator.previewOrientation
+    return sensorOrientation.relativeTo(orientation: interfaceOrientation)
   }
 
   /**
    The orientation of all outputs (photo, video, ..)
    */
   var outputOrientation: Orientation {
-    switch targetOutputOrientation {
-    case .device:
-      // Outputs should use whatever orientation the device is held in, even if screen-lock is on.
-      guard let orientationCoordinator else {
-        return .portrait
-      }
-      return orientationCoordinator.outputOrientation
-    case .preview:
-      // Outputs should use the same orientation as the preview view, which respects screen-lock.
+    if targetOutputOrientation == .preview {
       return previewOrientation
-    case .portrait, .landscapeLeft, .portraitUpsideDown, .landscapeRight:
-      // Outputs should be locked to the specific orientation given by the user.
-      guard let lockedOrientation = targetOutputOrientation.lockedOrientation,
-            let device else {
-        return previewOrientation
-      }
-      let sensorOrientation = device.sensorOrientation
-      return lockedOrientation.rotatedBy(orientation: sensorOrientation)
     }
+
+    return sensorOrientation.relativeTo(orientation: deviceOrientation)
+  }
+
+  init() {
+    // Default values for Orientation
+    sensorOrientation = DEFAULT_SENSOR_ORIENTATION
+    interfaceOrientation = Orientation(interfaceOrientation: UIApplication.shared.interfaceOrientation)
+    deviceOrientation = interfaceOrientation
+
+    // Start listening to UI-orientation changes
+    UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+    NotificationCenter.default.addObserver(self,
+                                           selector: #selector(onDeviceOrientationChanged),
+                                           name: UIDevice.orientationDidChangeNotification,
+                                           object: nil)
+  }
+
+  deinit {
+    // Stop gyro updates
+    stopDeviceOrientationListener()
+    // Stop UI-orientation updates
+    UIDevice.current.endGeneratingDeviceOrientationNotifications()
+    NotificationCenter.default.removeObserver(self,
+                                              name: UIDevice.orientationDidChangeNotification,
+                                              object: nil)
   }
 
   func setInputDevice(_ device: AVCaptureDevice) {
-    self.device = device
-    createObserver()
-  }
-
-  func setPreviewView(_ previewView: PreviewView) {
-    previewLayer = previewView.videoPreviewLayer
-    createObserver()
-  }
-
-  private func createObserver() {
-    guard let device = device else {
-      return
-    }
-
-    if #available(iOS 17.0, *) {
-      // On iOS 17+, we can use the new RotationCoordinator API which requires the device and optionally a preview view.
-      orientationCoordinator = ModernCameraOrientationCoordinator(device: device, previewLayer: previewLayer)
-    } else {
-      // On iOS <17 we need to use the old UIDevice APIs and do a bit of rotations manually.
-      orientationCoordinator = LegacyCameraOrientationCoordinator(device: device)
-    }
-
-    orientationCoordinator?.setDelegate(self)
+    // All orientations here are relative to the device's native sensor orientation.
+    sensorOrientation = device.sensorOrientation
   }
 
   func setTargetOutputOrientation(_ targetOrientation: OutputOrientation) {
     VisionLogger.log(level: .info, message: "Setting target output orientation from \(targetOutputOrientation) to \(targetOrientation)...")
     targetOutputOrientation = targetOrientation
-    // update delegate listener
-    onOrientationChanged()
+    maybeUpdateOrientations()
+
+    switch targetOrientation {
+    case .device:
+      // If we want device orientations, we start streaming using CMMotionManager.
+      startDeviceOrientationListener()
+    case .preview:
+      // If we just want preview orientations, we don't need CMMotionManager and can stop it.
+      stopDeviceOrientationListener()
+    }
   }
 
-  func onOrientationChanged() {
-    if lastPreviewOrientation != previewOrientation {
-      // Preview orientation changed
+  @objc
+  private func onDeviceOrientationChanged(notification _: NSNotification) {
+    // Whenever the UIDevice orientation changes, we get the current interface orientation (UI).
+    // Interface orientation determines previewOrientation. This will not be called if rotation is locked in control center.
+    interfaceOrientation = Orientation(interfaceOrientation: UIApplication.shared.interfaceOrientation)
+  }
+
+  private func maybeUpdateOrientations() {
+    if previewOrientation != lastPreviewOrientation {
+      // Preview Orientation changed!
       delegate?.onPreviewOrientationChanged(previewOrientation: previewOrientation)
       lastPreviewOrientation = previewOrientation
     }
-    if lastOutputOrientation != outputOrientation {
-      // Output orientation changed
+    if outputOrientation != lastOutputOrientation {
+      // Output Orientation changed!
       delegate?.onOutputOrientationChanged(outputOrientation: outputOrientation)
       lastOutputOrientation = outputOrientation
+    }
+  }
+
+  private func startDeviceOrientationListener() {
+    stopDeviceOrientationListener()
+    if motionManager.isAccelerometerAvailable {
+      motionManager.accelerometerUpdateInterval = 0.2
+      motionManager.startAccelerometerUpdates(to: operationQueue) { accelerometerData, error in
+        if let error {
+          VisionLogger.log(level: .error, message: "Failed to get Accelerometer data! \(error)")
+        }
+        if let accelerometerData {
+          self.deviceOrientation = accelerometerData.deviceOrientation
+        }
+      }
+    }
+  }
+
+  private func stopDeviceOrientationListener() {
+    if motionManager.isAccelerometerActive {
+      motionManager.stopAccelerometerUpdates()
     }
   }
 }

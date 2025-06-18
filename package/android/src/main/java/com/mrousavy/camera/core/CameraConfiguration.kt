@@ -1,5 +1,6 @@
 package com.mrousavy.camera.core
 
+import android.util.Range
 import androidx.camera.core.Preview.SurfaceProvider
 import com.mrousavy.camera.core.types.CameraDeviceFormat
 import com.mrousavy.camera.core.types.CodeType
@@ -19,6 +20,8 @@ data class CameraConfiguration(
   var video: Output<Video> = Output.Disabled.create(),
   var frameProcessor: Output<FrameProcessor> = Output.Disabled.create(),
   var codeScanner: Output<CodeScanner> = Output.Disabled.create(),
+  var minFps: Int? = null,
+  var maxFps: Int? = null,
   var enableLocation: Boolean = false,
 
   // Orientation
@@ -28,7 +31,6 @@ data class CameraConfiguration(
   var format: CameraDeviceFormat? = null,
 
   // Side-Props
-  var fps: Int? = null,
   var enableLowLightBoost: Boolean = false,
   var torch: Torch = Torch.OFF,
   var videoStabilizationMode: VideoStabilizationMode = VideoStabilizationMode.OFF,
@@ -45,11 +47,34 @@ data class CameraConfiguration(
 ) {
   // Output<T> types, those need to be comparable
   data class CodeScanner(val codeTypes: List<CodeType>)
-  data class Photo(val enableHdr: Boolean, val photoQualityBalance: QualityBalance)
-  data class Video(val enableHdr: Boolean)
-  data class FrameProcessor(val pixelFormat: PixelFormat)
+  data class Photo(val isMirrored: Boolean, val enableHdr: Boolean, val photoQualityBalance: QualityBalance)
+  data class Video(val isMirrored: Boolean, val enableHdr: Boolean, val bitRateOverride: Double?, val bitRateMultiplier: Double?)
+  data class FrameProcessor(val isMirrored: Boolean, val pixelFormat: PixelFormat)
   data class Audio(val nothing: Unit)
   data class Preview(val surfaceProvider: SurfaceProvider)
+
+  val targetFpsRange: Range<Int>?
+    get() {
+      val minFps = minFps ?: return null
+      val maxFps = maxFps ?: return null
+      return Range(minFps, maxFps)
+    }
+
+  val targetPreviewAspectRatio: Float?
+    get() {
+      val format = format ?: return null
+      val video = video as? Output.Enabled<Video>
+      val photo = photo as? Output.Enabled<Photo>
+      return if (video != null) {
+        // Video capture is enabled, use video aspect ratio
+        format.videoWidth.toFloat() / format.videoHeight.toFloat()
+      } else if (photo != null) {
+        // Photo capture is enabled, use photo aspect ratio
+        format.photoWidth.toFloat() / format.photoHeight.toFloat()
+      } else {
+        null
+      }
+    }
 
   @Suppress("EqualsOrHashCode")
   sealed class Output<T> {
@@ -96,9 +121,6 @@ data class CameraConfiguration(
     fun copyOf(other: CameraConfiguration?): CameraConfiguration = other?.copy() ?: CameraConfiguration()
 
     fun difference(left: CameraConfiguration?, right: CameraConfiguration): Difference {
-      // input device
-      val deviceChanged = left?.cameraId != right.cameraId
-
       // outputs
       val outputsChanged = left?.photo != right.photo ||
         left.video != right.video ||
@@ -108,10 +130,14 @@ data class CameraConfiguration(
         left.codeScanner != right.codeScanner ||
         left.preview != right.preview ||
         left.format != right.format ||
-        left.fps != right.fps
+        left.minFps != right.minFps ||
+        left.maxFps != right.maxFps
+
+      // input device
+      val deviceChanged = outputsChanged || left?.cameraId != right.cameraId
 
       // repeating request
-      val sidePropsChanged = outputsChanged ||
+      val sidePropsChanged = deviceChanged ||
         left?.torch != right.torch ||
         left.zoom != right.zoom ||
         left.exposure != right.exposure

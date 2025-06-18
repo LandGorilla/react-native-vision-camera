@@ -14,6 +14,9 @@ module.exports = {
     mermaid: true,
   },
   themes: ['@docusaurus/theme-mermaid'],
+  plugins: [
+    ['vercel-analytics', { }],
+  ],
   themeConfig: {
     /**
      * @type {import('@docusaurus/theme-mermaid').ThemeConfig['mermaid']}
@@ -95,7 +98,7 @@ module.exports = {
           position: 'left'
         },
         {
-          href: 'https://github.com/mrousavy/react-native-vision-camera/tree/main/package/example',
+          href: 'https://github.com/mrousavy/react-native-vision-camera/tree/main/example',
           label: 'Example App',
           position: 'left'
         },
@@ -127,7 +130,7 @@ module.exports = {
             },
             {
               label: 'Example App',
-              href: 'https://github.com/mrousavy/react-native-vision-camera/tree/main/package/example',
+              href: 'https://github.com/mrousavy/react-native-vision-camera/tree/main/example',
             },
           ],
         },
@@ -136,7 +139,7 @@ module.exports = {
           items: [
             {
               label: 'Community Discord',
-              href: 'https://discord.com/invite/6CSHz2qAvA',
+              href: 'https://margelo.com/discord',
             },
             {
               label: 'GitHub discussions',

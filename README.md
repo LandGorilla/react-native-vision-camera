@@ -1,4 +1,4 @@
-<a href="https://margelo.io">
+<a href="https://margelo.com">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="./docs/static/img/banner-dark.png" />
     <source media="(prefers-color-scheme: light)" srcset="./docs/static/img/banner-light.png" />
@@ -41,7 +41,7 @@ cd ios && pod install
 
 * [Guides](https://react-native-vision-camera.com/docs/guides)
 * [API](https://react-native-vision-camera.com/docs/api)
-* [Example](./package/example/)
+* [Example](./example/)
 * [Frame Processor Plugins](https://react-native-vision-camera.com/docs/guides/frame-processor-plugins-community)
 
 ### ShadowLens
@@ -74,7 +74,7 @@ function App() {
 }
 ```
 
-> See the [example](./package/example/) app
+> See the [example](./example/) app
 
 ### Adopting at scale
 
@@ -90,6 +90,6 @@ If you're integrating VisionCamera in a production app, consider [funding this p
 
 * 🐦 [**Follow me on Twitter**](https://twitter.com/mrousavy) for updates
 * 📝 [**Check out my blog**](https://mrousavy.com/blog) for examples and experiments
-* 💬 [**Join the Margelo Community Discord**](https://discord.gg/6CSHz2qAvA) for chatting about VisionCamera
+* 💬 [**Join the Margelo Community Discord**](https://margelo.com/discord) for chatting about VisionCamera
 * 💖 [**Sponsor me on GitHub**](https://github.com/sponsors/mrousavy) to support my work
 * 🍪 [**Buy me a Ko-Fi**](https://ko-fi.com/mrousavy) to support my work

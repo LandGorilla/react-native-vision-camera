@@ -11,7 +11,7 @@ import Foundation
 
 // MARK: - CameraConfiguration
 
-class CameraConfiguration {
+final class CameraConfiguration {
   // pragma MARK: Configuration Props
 
   // Input
@@ -21,6 +21,7 @@ class CameraConfiguration {
   var photo: OutputConfiguration<Photo> = .disabled
   var video: OutputConfiguration<Video> = .disabled
   var codeScanner: OutputConfiguration<CodeScanner> = .disabled
+  var isMirrored = false
 
   // Location
   var enableLocation = false
@@ -35,7 +36,8 @@ class CameraConfiguration {
   var format: CameraDeviceFormat?
 
   // Side-Props
-  var fps: Int32?
+  var minFps: Int32?
+  var maxFps: Int32?
   var enableLowLightBoost = false
   var torch: Torch = .off
 
@@ -58,11 +60,13 @@ class CameraConfiguration {
       photo = other.photo
       video = other.video
       codeScanner = other.codeScanner
+      isMirrored = other.isMirrored
       enableLocation = other.enableLocation
       videoStabilizationMode = other.videoStabilizationMode
       outputOrientation = other.outputOrientation
       format = other.format
-      fps = other.fps
+      minFps = other.minFps
+      maxFps = other.maxFps
       enableLowLightBoost = other.enableLowLightBoost
       torch = other.torch
       zoom = other.zoom
@@ -79,6 +83,7 @@ class CameraConfiguration {
   /**
    Throw this to abort calls to configure { ... } and apply no changes.
    */
+  @frozen
   enum AbortThrow: Error {
     case abort
   }
@@ -117,7 +122,8 @@ class CameraConfiguration {
       // cameraId
       inputChanged = left?.cameraId != right.cameraId
       // photo, video, codeScanner
-      outputsChanged = inputChanged || left?.photo != right.photo || left?.video != right.video || left?.codeScanner != right.codeScanner
+      outputsChanged = inputChanged || left?.photo != right.photo || left?.video != right.video
+        || left?.codeScanner != right.codeScanner || left?.isMirrored != right.isMirrored
       // videoStabilizationMode
       videoStabilizationChanged = outputsChanged || left?.videoStabilizationMode != right.videoStabilizationMode
       // orientation
@@ -125,7 +131,7 @@ class CameraConfiguration {
       // format (depends on cameraId)
       formatChanged = inputChanged || left?.format != right.format
       // side-props (depends on format)
-      sidePropsChanged = formatChanged || left?.fps != right.fps || left?.enableLowLightBoost != right.enableLowLightBoost
+      sidePropsChanged = formatChanged || left?.minFps != right.minFps || left?.maxFps != right.maxFps || left?.enableLowLightBoost != right.enableLowLightBoost
       // torch (depends on isActive)
       let wasInactiveAndNeedsToEnableTorchAgain = left?.isActive == false && right.isActive == true && right.torch == .on
       torchChanged = inputChanged || wasInactiveAndNeedsToEnableTorchAgain || left?.torch != right.torch
@@ -142,6 +148,7 @@ class CameraConfiguration {
     }
   }
 
+  @frozen
   enum OutputConfiguration<T: Equatable>: Equatable {
     case disabled
     case enabled(config: T)

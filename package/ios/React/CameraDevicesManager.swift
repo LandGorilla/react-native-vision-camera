@@ -10,7 +10,7 @@ import AVFoundation
 import Foundation
 
 @objc(CameraDevicesManager)
-class CameraDevicesManager: RCTEventEmitter {
+final class CameraDevicesManager: RCTEventEmitter {
   private let discoverySession = AVCaptureDevice.DiscoverySession(deviceTypes: getAllDeviceTypes(),
                                                                   mediaType: .video,
                                                                   position: .unspecified)
@@ -20,7 +20,11 @@ class CameraDevicesManager: RCTEventEmitter {
   override init() {
     super.init()
     observer = discoverySession.observe(\.devices) { _, _ in
-      self.sendEvent(withName: self.devicesChangedEventName, body: self.getDevicesJson())
+      let devices = self.getDevicesJson()
+      VisionLogger.log(level: .info, message: "Camera Devices changed - found \(devices.count) Camera Devices.")
+
+      self.sendEvent(withName: self.devicesChangedEventName,
+                     body: devices)
     }
   }
 
@@ -32,17 +36,18 @@ class CameraDevicesManager: RCTEventEmitter {
     return [devicesChangedEventName]
   }
 
-  override class func requiresMainQueueSetup() -> Bool {
+  override static func requiresMainQueueSetup() -> Bool {
     return false
   }
 
   override func constantsToExport() -> [AnyHashable: Any]! {
     let devices = getDevicesJson()
-    let preferredDevice = getPreferredDevice()
+    let preferredDevice = getPreferredDeviceJson()
+    VisionLogger.log(level: .info, message: "Found \(devices.count) initial Camera Devices.")
 
     return [
       "availableCameraDevices": devices,
-      "userPreferredCameraDevice": preferredDevice?.toDictionary() as Any,
+      "userPreferredCameraDevice": preferredDevice as Any,
     ]
   }
 
@@ -52,17 +57,34 @@ class CameraDevicesManager: RCTEventEmitter {
     }
   }
 
+  private func getPreferredDeviceJson() -> [String: Any]? {
+    let preferredDevice = getPreferredDevice()
+    return preferredDevice?.toDictionary()
+  }
+
   private func getPreferredDevice() -> AVCaptureDevice? {
-    #if swift(>=5.9)
-      if #available(iOS 17.0, *) {
-        if let userPreferred = AVCaptureDevice.userPreferredCamera {
-          // Return the device that was explicitly marked as a preferred camera by the user
-          return userPreferred
+    if #available(iOS 17.0, *) {
+      if let userPreferred = AVCaptureDevice.userPreferredCamera {
+        guard !userPreferred.uniqueID.isEmpty else {
+          // Due to an iOS 17 bug, Simulators return a non-nil AVCaptureDevice here,
+          // but all properties on this AVCaptureDevice are 0x0/empty/invalid.
+          // So we catch this bug and return a nil preferred device here.
+          return nil
         }
+        // Return the device that was explicitly marked as a preferred camera by the user
+        return userPreferred
       }
-    #endif
-    // Just return the first device
-    return discoverySession.devices.first
+    }
+    // Usually prefer the wide angle back camera
+    if let defaultBackWideAngle = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) {
+      return defaultBackWideAngle
+    }
+    // Fall back to the default video
+    if let defaultVideo = AVCaptureDevice.default(for: .video) {
+      return defaultVideo
+    }
+    // Return nil because apparently we couldn't find a default
+    return nil
   }
 
   private static func getAllDeviceTypes() -> [AVCaptureDevice.DeviceType] {
@@ -80,13 +102,14 @@ class CameraDevicesManager: RCTEventEmitter {
       deviceTypes.append(.builtInLiDARDepthCamera)
     }
 
-    // iOS 17 specifics:
-    //  This is only reported if `NSCameraUseExternalDeviceType` is set to true in Info.plist,
-    //  otherwise external devices are just reported as wide-angle-cameras
-    // deviceTypes.append(.external)
-    //  This is only reported if `NSCameraUseContinuityCameraDeviceType` is set to true in Info.plist,
-    //  otherwise continuity camera devices are just reported as wide-angle-cameras
-    // deviceTypes.append(.continuityCamera)
+    if #available(iOS 17.0, *) {
+      // This is only reported if `NSCameraUseExternalDeviceType` is set to true in Info.plist,
+      // otherwise external devices are just reported as wide-angle-cameras
+      deviceTypes.append(.external)
+      // This is only reported if `NSCameraUseContinuityCameraDeviceType` is set to true in Info.plist,
+      // otherwise continuity camera devices are just reported as wide-angle-cameras
+      deviceTypes.append(.continuityCamera)
+    }
 
     return deviceTypes
   }

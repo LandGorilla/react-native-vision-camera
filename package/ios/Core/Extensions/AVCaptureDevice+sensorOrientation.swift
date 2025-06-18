@@ -8,13 +8,16 @@
 import AVFoundation
 import Foundation
 
+// On iOS, a camera device's natural sensor orientation is either
+// always portrait, or .videoOrientation already takes natural sensor
+// orientation into account.
+let DEFAULT_SENSOR_ORIENTATION = Orientation.portrait
+
 extension AVCaptureDevice {
   /**
    Get the natural orientation of the camera sensor of this specific device.
-
-   Note: On iOS, all sensors are landscape-left.
    */
   var sensorOrientation: Orientation {
-    return .landscapeLeft
+    return .portrait
   }
 }

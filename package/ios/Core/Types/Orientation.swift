@@ -13,7 +13,8 @@ import UIKit
 /**
  The Orientation used for the Preview, Photo, Video and Frame Processor outputs.
  */
-enum Orientation: String, JSUnionValue {
+@frozen
+public enum Orientation: String, JSUnionValue {
   /**
    Phone is in upright portrait mode, home button/indicator is at the bottom
    */
@@ -40,15 +41,18 @@ enum Orientation: String, JSUnionValue {
   }
 
   init(degrees: Double) {
-    switch degrees {
+    let normalized = Orientation.normalizeDegrees(degrees)
+    switch normalized {
     case 45 ..< 135:
       self = .landscapeLeft
     case 135 ..< 225:
       self = .portraitUpsideDown
     case 225 ..< 315:
       self = .landscapeRight
-    default:
+    case 315 ..< 360, 0 ..< 45:
       self = .portrait
+    default:
+      fatalError("Orientation: Invalid degrees (\(degrees)°) specified!")
     }
   }
 
@@ -57,13 +61,11 @@ enum Orientation: String, JSUnionValue {
     case .portrait:
       self = .portrait
     case .landscapeRight:
-      // view is counter-rotated
-      self = .landscapeLeft
+      self = .landscapeRight
     case .portraitUpsideDown:
       self = .portraitUpsideDown
-    // view is counter-rotated
     case .landscapeLeft:
-      self = .landscapeRight
+      self = .landscapeLeft
     default:
       self = .portrait
     }
@@ -89,11 +91,13 @@ enum Orientation: String, JSUnionValue {
     case .portrait:
       self = .portrait
     case .landscapeRight:
-      self = .landscapeRight
+      // Interface orientation landscapeRight is the opposite of device orientation
+      self = .landscapeLeft
     case .portraitUpsideDown:
       self = .portraitUpsideDown
     case .landscapeLeft:
-      self = .landscapeLeft
+      // Interface orientation landscapeLeft is the opposite of device orientation
+      self = .landscapeRight
     default:
       self = .portrait
     }
@@ -155,25 +159,42 @@ enum Orientation: String, JSUnionValue {
     }
   }
 
+  @inline(__always)
+  var isPortrait: Bool {
+    return self == .portrait || self == .portraitUpsideDown
+  }
+
+  @inline(__always)
   var isLandscape: Bool {
     return self == .landscapeLeft || self == .landscapeRight
   }
 
+  @inline(__always)
   func rotatedBy(degrees: Double) -> Orientation {
-    let added = self.degrees + degrees
-    let degress = added.truncatingRemainder(dividingBy: 360)
-    return Orientation(degrees: degress)
+    return Orientation(degrees: self.degrees + degrees)
   }
 
+  @inline(__always)
   func rotatedBy(orientation: Orientation) -> Orientation {
     return rotatedBy(degrees: orientation.degrees)
   }
 
+  @inline(__always)
   func flipped() -> Orientation {
     return rotatedBy(degrees: 180)
   }
 
+  @inline(__always)
   func relativeTo(orientation: Orientation) -> Orientation {
     return rotatedBy(degrees: -orientation.degrees)
+  }
+
+  @inline(__always)
+  static func normalizeDegrees(_ degrees: Double) -> Double {
+    let normalized = degrees.truncatingRemainder(dividingBy: 360)
+    if normalized < 0 {
+      return normalized + 360
+    }
+    return normalized
   }
 }

@@ -8,6 +8,7 @@ import { WorkletsProxy } from '../dependencies/WorkletsProxy'
 import { SkiaProxy } from '../dependencies/SkiaProxy'
 import { withFrameRefCounting } from '../frame-processors/withFrameRefCounting'
 import { VisionCameraProxy } from '../frame-processors/VisionCameraProxy'
+import type { Orientation } from '../types/Orientation'
 
 /**
  * Represents a Camera Frame that can be directly drawn to using Skia.
@@ -46,11 +47,40 @@ type SurfaceCache = Record<
   }
 >
 
+function getDegrees(orientation: Orientation): number {
+  'worklet'
+  switch (orientation) {
+    case 'portrait':
+      return 0
+    case 'landscape-left':
+      return 90
+    case 'portrait-upside-down':
+      return 180
+    case 'landscape-right':
+      return 270
+  }
+}
+
+function getOrientation(degrees: number): Orientation {
+  'worklet'
+  const clamped = (degrees + 360) % 360
+  if (clamped >= 315 || clamped <= 45) return 'portrait'
+  else if (clamped >= 45 && clamped <= 135) return 'landscape-left'
+  else if (clamped >= 135 && clamped <= 225) return 'portrait-upside-down'
+  else if (clamped >= 225 && clamped <= 315) return 'landscape-right'
+  else throw new Error(`Invalid degrees! ${degrees}`)
+}
+
+function relativeTo(a: Orientation, b: Orientation): Orientation {
+  'worklet'
+  return getOrientation(getDegrees(a) - getDegrees(b))
+}
+
 /**
  * Counter-rotates the {@linkcode canvas} by the {@linkcode frame}'s {@linkcode Frame.orientation orientation}
  * to ensure the Frame will be drawn upright.
  */
-function withRotatedFrame(frame: Frame, canvas: SkCanvas, func: () => void): void {
+function withRotatedFrame(frame: Frame, canvas: SkCanvas, previewOrientation: Orientation, func: () => void): void {
   'worklet'
 
   // 1. save current translation matrix
@@ -58,14 +88,15 @@ function withRotatedFrame(frame: Frame, canvas: SkCanvas, func: () => void): voi
 
   try {
     // 2. properly rotate canvas so Frame is rendered up-right.
-    switch (frame.orientation) {
+    const orientation = relativeTo(frame.orientation, previewOrientation)
+    switch (orientation) {
       case 'portrait':
         // do nothing
         break
       case 'landscape-left':
         // rotate two flips on (0,0) origin and move X + Y into view again
         canvas.translate(frame.height, frame.width)
-        canvas.translate(270, 0)
+        canvas.rotate(270, 0, 0)
         break
       case 'portrait-upside-down':
         // rotate three flips on (0,0) origin and move Y into view again
@@ -139,6 +170,7 @@ export function createSkiaFrameProcessor(
   frameProcessor: (frame: DrawableFrame) => void,
   surfaceHolder: ISharedValue<SurfaceCache>,
   offscreenTextures: ISharedValue<SkImage[]>,
+  previewOrientation: ISharedValue<Orientation>,
 ): DrawableFrameProcessor {
   const Skia = SkiaProxy.Skia
   const Worklets = WorkletsProxy.Worklets
@@ -168,8 +200,8 @@ export function createSkiaFrameProcessor(
     const size = getSurfaceSize(frame)
     if (
       surfaceHolder.value[threadId] == null ||
-      surfaceHolder.value[threadId]?.width !== size.width ||
-      surfaceHolder.value[threadId]?.height !== size.height
+      surfaceHolder.value[threadId].width !== size.width ||
+      surfaceHolder.value[threadId].height !== size.height
     ) {
       const surface = Skia.Surface.MakeOffscreen(size.width, size.height)
       if (surface == null) {
@@ -180,8 +212,7 @@ export function createSkiaFrameProcessor(
       delete surfaceHolder.value[threadId]
       surfaceHolder.value[threadId] = { surface: surface, width: size.width, height: size.height }
     }
-    const surface = surfaceHolder.value[threadId]?.surface
-    if (surface == null) throw new Error(`Couldn't find Surface in Thread-cache! ID: ${threadId}`)
+    const surface = surfaceHolder.value[threadId].surface
     return surface
   }
 
@@ -236,7 +267,7 @@ export function createSkiaFrameProcessor(
         canvas.clear(black)
 
         // 4. rotate the frame properly to make sure it's upright
-        withRotatedFrame(frame, canvas, () => {
+        withRotatedFrame(frame, canvas, previewOrientation.value, () => {
           // 5. Run any user drawing operations
           frameProcessor(drawableFrame)
         })
@@ -264,6 +295,7 @@ export function createSkiaFrameProcessor(
     }),
     type: 'drawable-skia',
     offscreenTextures: offscreenTextures,
+    previewOrientation: previewOrientation,
   }
 }
 
@@ -301,6 +333,7 @@ export function useSkiaFrameProcessor(
 ): DrawableFrameProcessor {
   const surface = WorkletsProxy.useSharedValue<SurfaceCache>({})
   const offscreenTextures = WorkletsProxy.useSharedValue<SkImage[]>([])
+  const previewOrientation = WorkletsProxy.useSharedValue<Orientation>('portrait')
 
   useEffect(() => {
     return () => {
@@ -322,7 +355,7 @@ export function useSkiaFrameProcessor(
   }, [offscreenTextures, surface])
 
   return useMemo(
-    () => createSkiaFrameProcessor(frameProcessor, surface, offscreenTextures),
+    () => createSkiaFrameProcessor(frameProcessor, surface, offscreenTextures, previewOrientation),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     dependencies,
   )

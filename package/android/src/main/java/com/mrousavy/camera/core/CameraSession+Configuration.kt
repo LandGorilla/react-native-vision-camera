@@ -2,7 +2,6 @@ package com.mrousavy.camera.core
 
 import android.annotation.SuppressLint
 import android.util.Log
-import android.util.Range
 import androidx.annotation.OptIn
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.CameraState
@@ -23,18 +22,10 @@ import com.mrousavy.camera.core.extensions.*
 import com.mrousavy.camera.core.types.CameraDeviceFormat
 import com.mrousavy.camera.core.types.Torch
 import com.mrousavy.camera.core.types.VideoStabilizationMode
+import com.mrousavy.camera.core.utils.CamcorderProfileUtils
 import kotlin.math.roundToInt
 
-internal fun getTargetFpsRange(configuration: CameraConfiguration): Range<Int>? {
-  val fps = configuration.fps ?: return null
-  return if (configuration.enableLowLightBoost) {
-    Range(fps / 2, fps)
-  } else {
-    Range(fps, fps)
-  }
-}
-
-internal fun assertFormatRequirement(
+private fun assertFormatRequirement(
   propName: String,
   format: CameraDeviceFormat?,
   throwIfNotMet: CameraError,
@@ -54,8 +45,9 @@ internal fun assertFormatRequirement(
 @SuppressLint("RestrictedApi")
 @Suppress("LiftReturnOrAssignment")
 internal fun CameraSession.configureOutputs(configuration: CameraConfiguration) {
-  Log.i(CameraSession.TAG, "Creating new Outputs for Camera #${configuration.cameraId}...")
-  val fpsRange = getTargetFpsRange(configuration)
+  val cameraId = configuration.cameraId!!
+  Log.i(CameraSession.TAG, "Creating new Outputs for Camera #$cameraId...")
+  val fpsRange = configuration.targetFpsRange
   val format = configuration.format
 
   Log.i(CameraSession.TAG, "Using FPS Range: $fpsRange")
@@ -83,9 +75,11 @@ internal fun CameraSession.configureOutputs(configuration: CameraConfiguration) 
       }
 
       if (format != null) {
-        // Similar to iOS, Preview will follow video size as it's size (and aspect ratio)
+        // Preview will follow video size as it's size & aspect ratio, or photo- if video is disabled.
+        val targetSize = if (videoConfig != null) format.videoSize else format.photoSize
+
         val previewResolutionSelector = ResolutionSelector.Builder()
-          .forSize(format.videoSize)
+          .forSize(targetSize)
           .setAllowedResolutionMode(ResolutionSelector.PREFER_CAPTURE_RATE_OVER_HIGHER_RESOLUTION)
           .build()
         preview.setResolutionSelector(previewResolutionSelector)
@@ -130,17 +124,34 @@ internal fun CameraSession.configureOutputs(configuration: CameraConfiguration) 
       // We are currently not recording, so we can re-create a recorder instance if needed.
       Log.i(CameraSession.TAG, "Creating new Recorder...")
       Recorder.Builder().also { recorder ->
-        configuration.format?.let { format ->
+        format?.let { format ->
           recorder.setQualitySelector(format.videoQualitySelector)
         }
-        // TODO: Make videoBitRate a Camera Prop
-        // video.setTargetVideoEncodingBitRate()
+        videoConfig.config.bitRateOverride?.let { bitRateOverride ->
+          val bps = bitRateOverride * 1_000_000
+          recorder.setTargetVideoEncodingBitRate(bps.toInt())
+        }
+        videoConfig.config.bitRateMultiplier?.let { bitRateMultiplier ->
+          if (format == null) {
+            // We need to get the videoSize to estimate the bitRate modifier
+            throw PropRequiresFormatToBeNonNullError("videoBitRate")
+          }
+          val recommendedBitRate = CamcorderProfileUtils.getRecommendedBitRate(cameraId, format.videoSize)
+          if (recommendedBitRate != null) {
+            val targetBitRate = recommendedBitRate.toDouble() * bitRateMultiplier
+            recorder.setTargetVideoEncodingBitRate(targetBitRate.toInt())
+          }
+        }
       }.build()
     }
 
     val video = VideoCapture.Builder(recorder).also { video ->
       // Configure Video Output
-      video.setMirrorMode(MirrorMode.MIRROR_MODE_ON_FRONT_ONLY)
+      if (videoConfig.config.isMirrored) {
+        video.setMirrorMode(MirrorMode.MIRROR_MODE_ON)
+      } else {
+        video.setMirrorMode(MirrorMode.MIRROR_MODE_OFF)
+      }
       if (configuration.videoStabilizationMode.isAtLeast(VideoStabilizationMode.STANDARD)) {
         assertFormatRequirement("videoStabilizationMode", format, InvalidVideoStabilizationMode(configuration.videoStabilizationMode)) {
           it.videoStabilizationModes.contains(configuration.videoStabilizationMode)
