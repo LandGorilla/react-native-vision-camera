@@ -258,4 +258,17 @@ class CameraViewModule(reactContext: ReactApplicationContext) : ReactContextBase
   fun requestLocationPermission(promise: Promise) {
     requestPermission(Manifest.permission.ACCESS_FINE_LOCATION, promise)
   }
+
+  @ReactMethod
+  fun hasDepthOutputCapability(cameraId: String, promise: Promise) {
+    try {
+      val cameraManager = reactApplicationContext.getSystemService(android.content.Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+      val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+      val capabilities = characteristics.get(android.hardware.camera2.CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+      val hasDepth = capabilities?.contains(android.hardware.camera2.CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_DEPTH_OUTPUT) == true
+      promise.resolve(hasDepth)
+    } catch (e: Exception) {
+      promise.reject("DEPTH_CAPABILITY_ERROR", e.message)
+    }
+  }
 }
