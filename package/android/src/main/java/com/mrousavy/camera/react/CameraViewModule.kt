@@ -274,19 +274,52 @@ class CameraViewModule(reactContext: ReactApplicationContext) : ReactContextBase
 
   @ReactMethod
   fun hasAnyDepthOutputCapability(promise: Promise) {
+    val cameraManager = reactApplicationContext.getSystemService(android.content.Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+
     try {
-      val cameraManager = reactApplicationContext.getSystemService(android.content.Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
       for (cameraId in cameraManager.cameraIdList) {
+        android.util.Log.i("ToFCheck", "📷 Revisando cámara con ID: $cameraId")
+
         val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+
+        // Obtener el tipo de lente
+        val lensFacing = characteristics.get(android.hardware.camera2.CameraCharacteristics.LENS_FACING)
+        val lensDescription = when (lensFacing) {
+          android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT -> "Frontal"
+          android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK -> "Trasera"
+          android.hardware.camera2.CameraCharacteristics.LENS_FACING_EXTERNAL -> "Externa"
+          else -> "Desconocida"
+        }
+        android.util.Log.i("ToFCheck", "🔍 Tipo de lente: $lensDescription")
+
+        // Obtener y loguear todas las capacidades
         val capabilities = characteristics.get(android.hardware.camera2.CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
-        if (capabilities?.contains(android.hardware.camera2.CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_DEPTH_OUTPUT) == true) {
+        if (capabilities != null) {
+          android.util.Log.i("ToFCheck", "🛠️ Capacidades disponibles (${capabilities.size}): ${capabilities.joinToString()}")
+        } else {
+          android.util.Log.w("ToFCheck", "⚠️ No se pudo obtener el listado de capacidades para la cámara $cameraId")
+        }
+
+        val hasDepth = capabilities?.contains(
+          android.hardware.camera2.CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_DEPTH_OUTPUT
+        ) == true
+
+        if (hasDepth) {
+          android.util.Log.i("ToFCheck", "✅ La cámara $cameraId ($lensDescription) tiene capacidad DEPTH_OUTPUT")
           promise.resolve(true)
           return
+        } else {
+          android.util.Log.i("ToFCheck", "❌ La cámara $cameraId ($lensDescription) NO tiene capacidad DEPTH_OUTPUT")
         }
       }
+
+      // Ninguna cámara tiene DEPTH_OUTPUT
+      android.util.Log.w("ToFCheck", "🚫 Ninguna cámara del dispositivo tiene capacidad DEPTH_OUTPUT")
       promise.resolve(false)
-    } catch (e: Exception) {
-      promise.reject("DEPTH_CAPABILITY_ERROR", e.message)
+
+    } catch (e: android.hardware.camera2.CameraAccessException) {
+      android.util.Log.e("ToFCheck", "🛑 Error al acceder a la cámara: ${e.message}", e)
+      promise.reject("CAMERA_ACCESS_ERROR", "Error al acceder a la cámara", e)
     }
   }
 }
