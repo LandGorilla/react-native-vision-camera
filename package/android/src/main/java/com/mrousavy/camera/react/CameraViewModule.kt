@@ -322,4 +322,30 @@ class CameraViewModule(reactContext: ReactApplicationContext) : ReactContextBase
       promise.reject("CAMERA_ACCESS_ERROR", "Error al acceder a la cámara", e)
     }
   }
+
+  @ReactMethod
+  fun hasAnyDepthOutputCapabilityV2(promise: Promise) {
+    val cameraManager = reactApplicationContext.getSystemService(android.content.Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+    try {
+        for (cameraId in cameraManager.cameraIdList) {
+            val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+            val capabilities = characteristics.get(android.hardware.camera2.CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+            val hasDepthCapability = capabilities?.contains(
+                android.hardware.camera2.CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_DEPTH_OUTPUT
+            ) == true
+
+            val map = characteristics.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            val outputFormats = map?.outputFormats ?: intArrayOf()
+            val hasDepth16 = outputFormats.contains(android.graphics.ImageFormat.DEPTH16)
+
+            if (hasDepthCapability || hasDepth16) {
+                promise.resolve(true)
+                return
+            }
+        }
+        promise.resolve(false)
+    } catch (e: Exception) {
+        promise.reject("DEPTH_CAPABILITY_ERROR", e.message)
+    }
+  }
 }
