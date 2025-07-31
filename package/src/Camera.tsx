@@ -492,6 +492,44 @@ export class Camera extends React.PureComponent<CameraProps, CameraState> {
       throw tryParseNativeCameraError(e)
     }
   }
+
+  /**
+   * Checks if the specified camera device supports the DEPTH_OUTPUT capability (Android only).
+   * @param cameraId The ID of the camera device to check.
+   * @returns Promise that resolves to true if the camera supports DEPTH_OUTPUT, false otherwise.
+   */
+  public static async hasDepthOutputCapability(cameraId: string): Promise<boolean> {
+    try {
+      return await CameraModule.hasDepthOutputCapability(cameraId)
+    } catch (e) {
+      throw tryParseNativeCameraError(e)
+    }
+  }
+
+  /**
+   * Checks if any camera device on the device supports the DEPTH_OUTPUT capability (Android only).
+   * @returns Promise that resolves to true if any camera supports DEPTH_OUTPUT, false otherwise.
+   */
+  public static async hasAnyDepthOutputCapability(): Promise<boolean> {
+    try {
+      return await CameraModule.hasAnyDepthOutputCapability()
+    } catch (e) {
+      throw tryParseNativeCameraError(e)
+    }
+  }
+
+  /**
+   * Checks if any camera device supports either DEPTH_OUTPUT capability or DEPTH16 format (Android only).
+   * This is a more robust check for depth support.
+   * @returns Promise that resolves to true if any camera supports DEPTH_OUTPUT or DEPTH16, false otherwise.
+   */
+  public static async hasAnyDepthOutputCapabilityV2(): Promise<boolean> {
+    try {
+      return await CameraModule.hasAnyDepthOutputCapabilityV2()
+    } catch (e) {
+      throw tryParseNativeCameraError(e)
+    }
+  }
   //#endregion
 
   //#region Events (Wrapped to maintain reference equality)
