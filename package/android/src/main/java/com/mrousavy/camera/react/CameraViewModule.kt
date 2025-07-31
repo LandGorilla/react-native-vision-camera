@@ -33,6 +33,7 @@ import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import com.facebook.react.bridge.WritableNativeArray
 
 @ReactModule(name = CameraViewModule.TAG)
 @Suppress("unused")
@@ -369,7 +370,11 @@ class CameraViewModule(reactContext: ReactApplicationContext) : ReactContextBase
           depthCameraIds.add(cameraId)
         }
       }
-      promise.resolve(depthCameraIds)
+    val resultArray = WritableNativeArray()
+    for (id in depthCameraIds) {
+      resultArray.pushString(id)
+    }
+    promise.resolve(resultArray)
     } catch (e: Exception) {
       promise.reject("DEPTH_CAPABILITY_ERROR", e.message)
     }
