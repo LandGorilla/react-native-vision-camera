@@ -348,4 +348,30 @@ class CameraViewModule(reactContext: ReactApplicationContext) : ReactContextBase
         promise.reject("DEPTH_CAPABILITY_ERROR", e.message)
     }
   }
+
+  @ReactMethod
+  fun getDepthCapableCameraIds(promise: Promise) {
+    val cameraManager = reactApplicationContext.getSystemService(android.content.Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+    val depthCameraIds = mutableListOf<String>()
+    try {
+      for (cameraId in cameraManager.cameraIdList) {
+        val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+        val capabilities = characteristics.get(android.hardware.camera2.CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+        val hasDepthCapability = capabilities?.contains(
+          android.hardware.camera2.CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_DEPTH_OUTPUT
+        ) == true
+
+        val map = characteristics.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+        val outputFormats = map?.outputFormats ?: intArrayOf()
+        val hasDepth16 = outputFormats.contains(android.graphics.ImageFormat.DEPTH16)
+
+        if (hasDepthCapability || hasDepth16) {
+          depthCameraIds.add(cameraId)
+        }
+      }
+      promise.resolve(depthCameraIds)
+    } catch (e: Exception) {
+      promise.reject("DEPTH_CAPABILITY_ERROR", e.message)
+    }
+  }
 }

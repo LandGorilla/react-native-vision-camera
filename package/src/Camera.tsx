@@ -530,6 +530,18 @@ export class Camera extends React.PureComponent<CameraProps, CameraState> {
       throw tryParseNativeCameraError(e)
     }
   }
+
+  /**
+   * Returns a list of camera IDs that support depth output (DEPTH_OUTPUT or DEPTH16) on Android.
+   * @returns Promise that resolves to an array of cameraId strings.
+   */
+  public static async getDepthCapableCameraIds(): Promise<string[]> {
+    try {
+      return await CameraModule.getDepthCapableCameraIds()
+    } catch (e) {
+      throw tryParseNativeCameraError(e)
+    }
+  }
   //#endregion
 
   //#region Events (Wrapped to maintain reference equality)
