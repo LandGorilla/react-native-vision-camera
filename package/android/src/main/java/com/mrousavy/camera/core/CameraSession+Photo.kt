@@ -1,3 +1,4 @@
+
 package com.mrousavy.camera.core
 
 import android.content.Context
@@ -7,6 +8,10 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CameraDevice
+import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.TotalCaptureResult
 import android.media.AudioManager
 import android.util.Log
 import androidx.core.content.ContextCompat
@@ -25,7 +30,6 @@ import kotlin.math.pow
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
-import android.hardware.camera2.*
 import android.media.Image
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
@@ -126,78 +130,82 @@ private suspend fun captureDepth16Image(
 }
 
 suspend fun CameraSession.takePhoto(options: TakePhotoOptions): Photo {
+  // --- Nuevo flujo robusto Camera2 ---
+  Log.d("CameraSession", "INICIO takePhoto() - options: $options")
   val cameraId = camera2.cameraIdList.firstOrNull() ?: throw CameraNotReadyError()
   val characteristics = camera2.getCameraCharacteristics(cameraId)
   val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
   val outputFormats = map?.outputFormats ?: intArrayOf()
   val supportsDepth16 = outputFormats.contains(ImageFormat.DEPTH16)
-
-  val width = options.file.file?.let { FileUtils.getImageSize(it.path).width } ?: 1280
-  val height = options.file.file?.let { FileUtils.getImageSize(it.path).height } ?: 720
-
-  val jpegReader = ImageReader.newInstance(width, height, ImageFormat.JPEG, 1)
-  val depthReader = if (supportsDepth16) ImageReader.newInstance(width, height, ImageFormat.DEPTH16, 1) else null
-  val handlerThread = HandlerThread("Camera2CaptureThread").apply { start() }
-  val handler = Handler(handlerThread.looper)
-
-  val surfaces = mutableListOf(jpegReader.surface)
-  if (depthReader != null) surfaces.add(depthReader.surface)
-
-  val photoResult = suspendCancellableCoroutine<Triple<File, Int, Int>> { cont ->
-    jpegReader.setOnImageAvailableListener({ reader ->
-      val image = reader.acquireLatestImage()
-      val buffer = image.planes[0].buffer
-      val bytes = ByteArray(buffer.remaining())
-      buffer.get(bytes)
-      val photoFile = options.file.file ?: File.createTempFile("photo", ".jpg")
-      photoFile.writeBytes(bytes)
-      val size = FileUtils.getImageSize(photoFile.path)
-      image.close()
-      cont.resume(Triple(photoFile, size.width, size.height))
-    }, handler)
+  var width = options.file.file?.let { FileUtils.getImageSize(it.path).width } ?: 1280
+  var height = options.file.file?.let { FileUtils.getImageSize(it.path).height } ?: 720
+  Log.d("CameraSession", "Photo dimensions before validation: width=$width, height=$height")
+  if (width <= 0 || height <= 0) {
+    Log.e("CameraSession", "Invalid image dimensions detected (width=$width, height=$height). Using default 1280x720.")
+    width = 1280
+    height = 720
   }
-
-  var depthVariance: Double? = null
-  if (depthReader != null) {
-    val depthImage = suspendCancellableCoroutine<Image?> { cont ->
-      depthReader.setOnImageAvailableListener({ reader ->
-        val image = reader.acquireLatestImage()
-        cont.resume(image)
-        reader.close()
-        handlerThread.quitSafely()
-      }, handler)
-    }
-    depthImage?.let {
-      val buffer = it.planes[0].buffer
-      val shortBuffer = buffer.asShortBuffer()
-      val depthValues = ShortArray(shortBuffer.remaining())
-      shortBuffer.get(depthValues)
-      val validDepths = depthValues.filter { v -> v > 0 }
-      depthVariance = if (validDepths.isNotEmpty()) {
-        val mean = validDepths.average()
-        validDepths.map { v -> (v - mean).pow(2) }.average()
-      } else 0.0
-      it.close()
-    }
-    depthReader.close()
-  }
-
-  // Verifica el permiso de cámara antes de abrirla
+  Log.d("CameraSession", "Photo dimensions after validation: width=$width, height=$height")
   val context = this.context
   if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
     throw SecurityException("Camera permission not granted")
   }
 
-  val cameraDevice = suspendCancellableCoroutine<CameraDevice> { cont ->
-    try {
-      camera2.openCamera(cameraId, object : CameraDevice.StateCallback() {
-        override fun onOpened(device: CameraDevice) { cont.resume(device) }
-        override fun onDisconnected(device: CameraDevice) { cont.resumeWith(Result.failure(CameraNotReadyError())) }
-        override fun onError(device: CameraDevice, error: Int) { cont.resumeWith(Result.failure(CameraNotReadyError())) }
-      }, handler)
-    } catch (e: SecurityException) {
-      cont.resumeWith(Result.failure(e))
+  val photoFile = options.file.file ?: File.createTempFile("photo", ".jpg")
+  var depthVariance: Double? = null
+
+  val handlerThread = HandlerThread("Camera2CaptureThread").apply { start() }
+  val handler = Handler(handlerThread.looper)
+  val jpegReader = ImageReader.newInstance(width, height, ImageFormat.JPEG, 1)
+  val surfaces = mutableListOf(jpegReader.surface)
+  val depthReader = if (supportsDepth16) ImageReader.newInstance(width, height, ImageFormat.DEPTH16, 1) else null
+  if (depthReader != null) surfaces.add(depthReader.surface)
+
+  var photoSaved = false
+  var widthResult = width
+  var heightResult = height
+
+  val imageListener = ImageReader.OnImageAvailableListener { reader ->
+    val image = reader.acquireLatestImage()
+    if (image != null) {
+      val buffer = image.planes[0].buffer
+      val bytes = ByteArray(buffer.remaining())
+      buffer.get(bytes)
+      photoFile.writeBytes(bytes)
+      val size = FileUtils.getImageSize(photoFile.path)
+      widthResult = size.width
+      heightResult = size.height
+      photoSaved = true
+      image.close()
     }
+  }
+  jpegReader.setOnImageAvailableListener(imageListener, handler)
+
+  if (depthReader != null) {
+    val depthListener = ImageReader.OnImageAvailableListener { reader ->
+      val image = reader.acquireLatestImage()
+      if (image != null) {
+        val buffer = image.planes[0].buffer
+        val shortBuffer = buffer.asShortBuffer()
+        val depthValues = ShortArray(shortBuffer.remaining())
+        shortBuffer.get(depthValues)
+        val validDepths = depthValues.filter { v -> v > 0 }
+        depthVariance = if (validDepths.isNotEmpty()) {
+          val mean = validDepths.average()
+          validDepths.map { v -> (v - mean).pow(2) }.average()
+        } else 0.0
+        image.close()
+      }
+    }
+    depthReader.setOnImageAvailableListener(depthListener, handler)
+  }
+
+  val cameraDevice = suspendCancellableCoroutine<CameraDevice> { cont ->
+    camera2.openCamera(cameraId, object : CameraDevice.StateCallback() {
+      override fun onOpened(device: CameraDevice) { cont.resume(device) }
+      override fun onDisconnected(device: CameraDevice) { cont.resumeWith(Result.failure(CameraNotReadyError())) }
+      override fun onError(device: CameraDevice, error: Int) { cont.resumeWith(Result.failure(CameraNotReadyError())) }
+    }, handler)
   }
 
   suspendCancellableCoroutine<Unit> { cont ->
@@ -217,15 +225,16 @@ suspend fun CameraSession.takePhoto(options: TakePhotoOptions): Photo {
 
   handlerThread.quitSafely()
 
-  val (photoFile, widthResult, heightResult) = photoResult
-  val rotatedPhotoFile = rotateImageIfNeeded(photoFile)
+  // Espera activa a que la imagen se guarde
+  val startWait = System.currentTimeMillis()
+  while (!photoSaved && System.currentTimeMillis() - startWait < 5000) {
+    Thread.sleep(50)
+  }
 
-  // Determina si la imagen debe ser espejada (mirrored)
+  val rotatedPhotoFile = rotateImageIfNeeded(photoFile)
   val lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING)
   val isFrontCamera = lensFacing == CameraCharacteristics.LENS_FACING_FRONT
-  // Si tienes una opción en options/config para forzar mirror, úsala aquí:
-  val isMirrored = isFrontCamera // o tu lógica personalizada
-
+  val isMirrored = isFrontCamera
   return Photo(rotatedPhotoFile.path, widthResult, heightResult, Orientation.PORTRAIT, isMirrored, depthVariance)
 }
 
