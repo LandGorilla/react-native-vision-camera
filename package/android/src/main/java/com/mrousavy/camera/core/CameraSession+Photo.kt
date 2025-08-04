@@ -1,4 +1,3 @@
-
 package com.mrousavy.camera.core
 
 import android.content.Context
@@ -132,7 +131,20 @@ private suspend fun captureDepth16Image(
 suspend fun CameraSession.takePhoto(options: TakePhotoOptions): Photo {
   // --- Nuevo flujo robusto Camera2 ---
   Log.d("CameraSession", "INICIO takePhoto() - options: $options")
-  val cameraId = camera2.cameraIdList.firstOrNull() ?: throw CameraNotReadyError()
+  // Selecciona la primera cámara trasera que soporte DEPTH16, si existe
+  val cameraId = camera2.cameraIdList.firstOrNull { id ->
+    val characteristics = camera2.getCameraCharacteristics(id)
+    val lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING)
+    val isBack = lensFacing == CameraCharacteristics.LENS_FACING_BACK
+    val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+    val outputFormats = map?.outputFormats ?: intArrayOf()
+    isBack && outputFormats.contains(ImageFormat.DEPTH16)
+  } ?: camera2.cameraIdList.firstOrNull { id ->
+    val characteristics = camera2.getCameraCharacteristics(id)
+    val lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING)
+    lensFacing == CameraCharacteristics.LENS_FACING_BACK
+  } ?: camera2.cameraIdList.firstOrNull() ?: throw CameraNotReadyError()
+
   val characteristics = camera2.getCameraCharacteristics(cameraId)
   val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
   val outputFormats = map?.outputFormats ?: intArrayOf()
