@@ -52,11 +52,14 @@ fun getDepthVariance(cameraId: String, cameraManager: CameraManager): Double? {
 
 fun rotateImageIfNeeded(photoFile: File): File {
   val bitmap = BitmapFactory.decodeFile(photoFile.path)
+  if (bitmap == null) {
+    throw IOException("Failed to decode image: file is empty or corrupt (${photoFile.path})")
+  }
   var exif: ExifInterface? = null
   try {
     exif = ExifInterface(photoFile)
   } catch (e: IOException) {
-    e.printStackTrace()
+    throw IOException("Failed to read EXIF metadata from image (${photoFile.path})", e)
   }
 
   val orientation = exif?.getAttributeInt(
@@ -85,7 +88,9 @@ fun rotateImageIfNeeded(photoFile: File): File {
 
   val rotatedFile = File(photoFile.parent, "rotated_${photoFile.name}")
   FileOutputStream(rotatedFile).use { out ->
-    rotatedBitmap.compress(Bitmap.CompressFormat.JPEG, 100, out)
+    if (!rotatedBitmap.compress(Bitmap.CompressFormat.JPEG, 100, out)) {
+      throw IOException("Failed to save rotated image to disk (${rotatedFile.path})")
+    }
   }
   return rotatedFile
 }
@@ -129,9 +134,9 @@ private suspend fun captureDepth16Image(
 }
 
 suspend fun CameraSession.takePhoto(options: TakePhotoOptions): Photo {
-  // --- Nuevo flujo robusto Camera2 ---
-  Log.d("CameraSession", "INICIO takePhoto() - options: $options")
-  // Selecciona la primera cámara trasera que soporte DEPTH16, si existe
+  // --- New robust Camera2 flow ---
+  Log.d("CameraSession", "START takePhoto() - options: $options")
+  // Select the first back camera that supports DEPTH16, if available
   val cameraId = camera2.cameraIdList.firstOrNull { id ->
     val characteristics = camera2.getCameraCharacteristics(id)
     val lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING)
@@ -170,6 +175,7 @@ suspend fun CameraSession.takePhoto(options: TakePhotoOptions): Photo {
   val handler = Handler(handlerThread.looper)
   val jpegReader = ImageReader.newInstance(width, height, ImageFormat.JPEG, 1)
   val surfaces = mutableListOf(jpegReader.surface)
+  // Only create and add depthReader if the camera supports DEPTH16
   val depthReader = if (supportsDepth16) ImageReader.newInstance(width, height, ImageFormat.DEPTH16, 1) else null
   if (depthReader != null) surfaces.add(depthReader.surface)
 
@@ -193,6 +199,7 @@ suspend fun CameraSession.takePhoto(options: TakePhotoOptions): Photo {
   }
   jpegReader.setOnImageAvailableListener(imageListener, handler)
 
+  // Only process the depth image if depthReader exists
   if (depthReader != null) {
     val depthListener = ImageReader.OnImageAvailableListener { reader ->
       val image = reader.acquireLatestImage()
@@ -237,7 +244,7 @@ suspend fun CameraSession.takePhoto(options: TakePhotoOptions): Photo {
 
   handlerThread.quitSafely()
 
-  // Espera activa a que la imagen se guarde
+  // Actively wait for the image to be saved
   val startWait = System.currentTimeMillis()
   while (!photoSaved && System.currentTimeMillis() - startWait < 5000) {
     Thread.sleep(50)
