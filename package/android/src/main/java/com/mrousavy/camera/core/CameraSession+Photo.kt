@@ -195,102 +195,223 @@ suspend fun CameraSession.takePhoto(options: TakePhotoOptions): Photo {
   var heightResult = height
 
   fun tryCapturePhoto(w: Int, h: Int): Boolean {
+    var photoSaved = false
+    var depthCaptured = false
+    var errorReason: String? = null
     val handlerThread = HandlerThread("Camera2CaptureThread").apply { start() }
     val handler = Handler(handlerThread.looper)
     val jpegReader = ImageReader.newInstance(w, h, ImageFormat.JPEG, 1)
     val surfaces = mutableListOf(jpegReader.surface)
     val depthReader = if (supportsDepth16) ImageReader.newInstance(depthWidth, depthHeight, ImageFormat.DEPTH16, 1) else null
     if (depthReader != null) surfaces.add(depthReader.surface)
-    photoSaved = false
-    widthResult = w
-    heightResult = h
     jpegReader.setOnImageAvailableListener(ImageReader.OnImageAvailableListener { reader ->
       val image = reader.acquireLatestImage()
       if (image != null) {
-        val buffer = image.planes[0].buffer
-        val bytes = ByteArray(buffer.remaining())
-        buffer.get(bytes)
-        photoFile.writeBytes(bytes)
-        val size = FileUtils.getImageSize(photoFile.path)
-        widthResult = size.width
-        heightResult = size.height
-        photoSaved = true
-        image.close()
+        try {
+          val buffer = image.planes[0].buffer
+          val bytes = ByteArray(buffer.remaining())
+          buffer.get(bytes)
+          photoFile.writeBytes(bytes)
+          val size = FileUtils.getImageSize(photoFile.path)
+          widthResult = size.width
+          heightResult = size.height
+          photoSaved = true
+        } catch (e: Exception) {
+          Log.e("CameraSession", "JPEG image save error: ${e.message}", e)
+          errorReason = "JPEG image save error: ${e.message}"
+        } finally {
+          image.close()
+        }
+      } else {
+        Log.e("CameraSession", "JPEG image is null (acquireLatestImage)")
+        errorReason = "JPEG image is null"
       }
     }, handler)
     if (depthReader != null) {
       depthReader.setOnImageAvailableListener(ImageReader.OnImageAvailableListener { reader ->
         val image = reader.acquireLatestImage()
         if (image != null) {
-          val buffer = image.planes[0].buffer
-          val shortBuffer = buffer.asShortBuffer()
-          val depthValues = ShortArray(shortBuffer.remaining())
-          shortBuffer.get(depthValues)
-          val validDepths = depthValues.filter { v -> v > 0 }
-          depthVariance = if (validDepths.isNotEmpty()) {
-            val mean = validDepths.average()
-            validDepths.map { v -> (v - mean).pow(2) }.average()
-          } else 0.0
-          image.close()
+          try {
+            val buffer = image.planes[0].buffer
+            val shortBuffer = buffer.asShortBuffer()
+            val depthValues = ShortArray(shortBuffer.remaining())
+            shortBuffer.get(depthValues)
+            val validDepths = depthValues.filter { v -> v > 0 }
+            depthVariance = if (validDepths.isNotEmpty()) {
+              val mean = validDepths.average()
+              validDepths.map { v -> (v - mean).pow(2) }.average()
+            } else 0.0
+            depthCaptured = true
+          } catch (e: Exception) {
+            Log.e("CameraSession", "DEPTH16 image error: ${e.message}", e)
+            errorReason = "DEPTH16 image error: ${e.message}"
+          } finally {
+            image.close()
+          }
+        } else {
+          Log.e("CameraSession", "DEPTH16 image is null (acquireLatestImage)")
+          errorReason = "DEPTH16 image is null"
         }
       }, handler)
     }
-    val cameraDevice = kotlinx.coroutines.runBlocking {
-      suspendCancellableCoroutine<CameraDevice> { cont ->
-        camera2.openCamera(cameraId, object : CameraDevice.StateCallback() {
-          override fun onOpened(device: CameraDevice) { cont.resume(device) }
-          override fun onDisconnected(device: CameraDevice) { cont.resumeWith(Result.failure(CameraNotReadyError())) }
-          override fun onError(device: CameraDevice, error: Int) { cont.resumeWith(Result.failure(CameraNotReadyError())) }
-        }, handler)
+    val cameraDevice = try {
+      kotlinx.coroutines.runBlocking {
+        suspendCancellableCoroutine<CameraDevice> { cont ->
+          camera2.openCamera(cameraId, object : CameraDevice.StateCallback() {
+            override fun onOpened(device: CameraDevice) { cont.resume(device) }
+            override fun onDisconnected(device: CameraDevice) {
+              Log.e("CameraSession", "Camera disconnected during open.")
+              cont.resumeWith(Result.failure(CameraNotReadyError()))
+            }
+            override fun onError(device: CameraDevice, error: Int) {
+              Log.e("CameraSession", "Camera error during open: $error")
+              cont.resumeWith(Result.failure(CameraNotReadyError()))
+            }
+          }, handler)
+        }
       }
+    } catch (e: Exception) {
+      Log.e("CameraSession", "Camera open failed: ${e.message}", e)
+      errorReason = "Camera open failed: ${e.message}"
+      handlerThread.quitSafely()
+      jpegReader.close()
+      depthReader?.close()
+      return false
     }
-    // Use runBlocking to call suspend function inside non-suspend context
-    kotlinx.coroutines.runBlocking {
-      suspendCancellableCoroutine<Unit> { cont ->
-        cameraDevice.createCaptureSession(surfaces, object : CameraCaptureSession.StateCallback() {
-          override fun onConfigured(session: CameraCaptureSession) {
-            val requestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
-            surfaces.forEach { requestBuilder.addTarget(it) }
-            session.capture(requestBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
-              override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+    // Try combined session first
+    val sessionSuccess = try {
+      kotlinx.coroutines.runBlocking {
+        suspendCancellableCoroutine<Unit> { cont ->
+          cameraDevice.createCaptureSession(surfaces, object : CameraCaptureSession.StateCallback() {
+            override fun onConfigured(session: CameraCaptureSession) {
+              val requestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
+              surfaces.forEach { requestBuilder.addTarget(it) }
+              session.capture(requestBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+                  cont.resume(Unit)
+                }
+              }, handler)
+            }
+            override fun onConfigureFailed(session: CameraCaptureSession) {
+              Log.e("CameraSession", "CaptureSession configure failed (combined)")
+              errorReason = "CaptureSession configure failed (combined)"
+              cont.resume(Unit)
+            }
+          }, handler)
+        }
+      }
+      true
+    } catch (e: Exception) {
+      Log.e("CameraSession", "CaptureSession (combined) error: ${e.message}", e)
+      errorReason = "CaptureSession (combined) error: ${e.message}"
+      false
+    }
+    // If combined session fails, try separate sessions for JPEG and DEPTH16
+    if (!sessionSuccess && supportsDepth16) {
+      Log.d("CameraSession", "Trying separate sessions for JPEG and DEPTH16...")
+      // JPEG only
+      try {
+        kotlinx.coroutines.runBlocking {
+          suspendCancellableCoroutine<Unit> { cont ->
+            cameraDevice.createCaptureSession(listOf(jpegReader.surface), object : CameraCaptureSession.StateCallback() {
+              override fun onConfigured(session: CameraCaptureSession) {
+                val requestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
+                requestBuilder.addTarget(jpegReader.surface)
+                session.capture(requestBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
+                  override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+                    cont.resume(Unit)
+                  }
+                }, handler)
+              }
+              override fun onConfigureFailed(session: CameraCaptureSession) {
+                Log.e("CameraSession", "JPEG-only session configure failed")
+                errorReason = "JPEG-only session configure failed"
                 cont.resume(Unit)
               }
             }, handler)
           }
-          override fun onConfigureFailed(session: CameraCaptureSession) { cont.resume(Unit) }
-        }, handler)
+        }
+      } catch (e: Exception) {
+        Log.e("CameraSession", "JPEG-only session error: ${e.message}", e)
+        errorReason = "JPEG-only session error: ${e.message}"
+      }
+      // DEPTH16 only
+      try {
+        kotlinx.coroutines.runBlocking {
+          suspendCancellableCoroutine<Unit> { cont ->
+            cameraDevice.createCaptureSession(listOf(depthReader!!.surface), object : CameraCaptureSession.StateCallback() {
+              override fun onConfigured(session: CameraCaptureSession) {
+                val requestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
+                requestBuilder.addTarget(depthReader.surface)
+                session.capture(requestBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
+                  override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+                    cont.resume(Unit)
+                  }
+                }, handler)
+              }
+              override fun onConfigureFailed(session: CameraCaptureSession) {
+                Log.e("CameraSession", "DEPTH16-only session configure failed")
+                errorReason = "DEPTH16-only session configure failed"
+                cont.resume(Unit)
+              }
+            }, handler)
+          }
+        }
+      } catch (e: Exception) {
+        Log.e("CameraSession", "DEPTH16-only session error: ${e.message}", e)
+        errorReason = "DEPTH16-only session error: ${e.message}"
+      }
+    }
+    // If still no depth, try TEMPLATE_PREVIEW for depth
+    if (supportsDepth16 && !depthCaptured) {
+      Log.d("CameraSession", "Trying TEMPLATE_PREVIEW for DEPTH16...")
+      try {
+        kotlinx.coroutines.runBlocking {
+          suspendCancellableCoroutine<Unit> { cont ->
+            cameraDevice.createCaptureSession(listOf(depthReader!!.surface), object : CameraCaptureSession.StateCallback() {
+              override fun onConfigured(session: CameraCaptureSession) {
+                val requestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+                requestBuilder.addTarget(depthReader.surface)
+                session.capture(requestBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
+                  override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+                    cont.resume(Unit)
+                  }
+                }, handler)
+              }
+              override fun onConfigureFailed(session: CameraCaptureSession) {
+                Log.e("CameraSession", "DEPTH16 TEMPLATE_PREVIEW session configure failed")
+                errorReason = "DEPTH16 TEMPLATE_PREVIEW session configure failed"
+                cont.resume(Unit)
+              }
+            }, handler)
+          }
+        }
+      } catch (e: Exception) {
+        Log.e("CameraSession", "DEPTH16 TEMPLATE_PREVIEW session error: ${e.message}", e)
+        errorReason = "DEPTH16 TEMPLATE_PREVIEW session error: ${e.message}"
       }
     }
     handlerThread.quitSafely()
+    jpegReader.close()
+    depthReader?.close()
     val startWait = System.currentTimeMillis()
     while (!photoSaved && System.currentTimeMillis() - startWait < 5000) {
       Thread.sleep(50)
     }
+    if (!photoSaved) {
+      Log.e("CameraSession", "Photo not saved after capture. Reason: $errorReason")
+    }
     return photoSaved
   }
 
-  // Try main resolution
-  var success = tryCapturePhoto(width, height)
-  // If failed, try fallback resolutions
-  if (!success) {
-    for ((w, h) in fallbackResolutions) {
-      Log.d("CameraSession", "Trying fallback resolution: $w x $h")
-      success = tryCapturePhoto(w, h)
-      if (success) {
-        triedFallback = true
-        break
-      }
-    }
-  }
-  if (!success) {
-    throw IOException("Failed to capture photo at any supported resolution.")
-  }
+  tryCapturePhoto(width, height)
 
   val rotatedPhotoFile = rotateImageIfNeeded(photoFile)
   val lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING)
   val isFrontCamera = lensFacing == CameraCharacteristics.LENS_FACING_FRONT
   val isMirrored = isFrontCamera
   return Photo(rotatedPhotoFile.path, widthResult, heightResult, Orientation.PORTRAIT, isMirrored, depthVariance)
+
 }
 
 private val AudioManager.isSilent: Boolean
