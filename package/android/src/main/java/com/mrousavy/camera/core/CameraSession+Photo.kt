@@ -204,6 +204,7 @@ suspend fun CameraSession.takePhoto(options: TakePhotoOptions): Photo {
     val surfaces = mutableListOf(jpegReader.surface)
     val depthReader = if (supportsDepth16) ImageReader.newInstance(depthWidth, depthHeight, ImageFormat.DEPTH16, 1) else null
     if (depthReader != null) surfaces.add(depthReader.surface)
+    // JPEG listener: always prioritize saving JPEG first
     jpegReader.setOnImageAvailableListener(ImageReader.OnImageAvailableListener { reader ->
       val image = reader.acquireLatestImage()
       if (image != null) {
@@ -211,11 +212,16 @@ suspend fun CameraSession.takePhoto(options: TakePhotoOptions): Photo {
           val buffer = image.planes[0].buffer
           val bytes = ByteArray(buffer.remaining())
           buffer.get(bytes)
-          photoFile.writeBytes(bytes)
-          val size = FileUtils.getImageSize(photoFile.path)
-          widthResult = size.width
-          heightResult = size.height
-          photoSaved = true
+          if (bytes.isNotEmpty()) {
+            photoFile.writeBytes(bytes)
+            val size = FileUtils.getImageSize(photoFile.path)
+            widthResult = size.width
+            heightResult = size.height
+            photoSaved = true
+          } else {
+            Log.e("CameraSession", "JPEG buffer is empty!")
+            errorReason = "JPEG buffer is empty"
+          }
         } catch (e: Exception) {
           Log.e("CameraSession", "JPEG image save error: ${e.message}", e)
           errorReason = "JPEG image save error: ${e.message}"
@@ -227,8 +233,10 @@ suspend fun CameraSession.takePhoto(options: TakePhotoOptions): Photo {
         errorReason = "JPEG image is null"
       }
     }, handler)
+    // DEPTH listener: only process if JPEG was saved
     if (depthReader != null) {
       depthReader.setOnImageAvailableListener(ImageReader.OnImageAvailableListener { reader ->
+        if (!photoSaved) return@OnImageAvailableListener // Don't process depth if JPEG failed
         val image = reader.acquireLatestImage()
         if (image != null) {
           try {
