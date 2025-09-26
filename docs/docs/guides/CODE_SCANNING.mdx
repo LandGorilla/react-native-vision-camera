@@ -10,8 +10,8 @@ import useBaseUrl from '@docusaurus/useBaseUrl'
 
 <div class="image-container">
   <svg xmlns="http://www.w3.org/2000/svg" width="283" height="535">
-    <image href={useBaseUrl("img/demo.gif")} x="18" y="33" width="247" height="469" />
-    <image href={useBaseUrl("img/frame.png")} width="283" height="535" />
+    <image href={useBaseUrl('img/demo.gif')} x="18" y="33" width="247" height="469" />
+    <image href={useBaseUrl('img/frame.png')} width="283" height="535" />
   </svg>
 </div>
 
@@ -23,8 +23,9 @@ A Code Scanner is a separate Camera output (just like photo or video) that can d
 - **Aztec**: Square Aztec codes
 - **Data Matrix**: Square Data Matrix codes
 - **Barcode (EAN)**: EAN-13 or EAN-8 Barcodes
-- **Barcode (Code)**: Code-128, Code-39 or Code-93 Barcodes
-- **Barcode (other)**: Codabar, Interleaved2of5 (ITF), ITF-14, UPC-E or PDF-417 Barcodes
+- **Barcode (Code)**: Code-128, Code-39, or Code-93 Barcodes
+- **Barcode (GS1)**: GS1 DataBar, GS1 DataBar Limited, GS1 DataBar Expanded, and their stacked versions
+- **Barcode (other)**: Codabar, Interleaved 2 of 5 (ITF), ITF-14, UPC-E, or PDF-417 Barcodes
 
 ## Setup
 
@@ -88,7 +89,7 @@ const codeScanner = useCodeScanner({
   codeTypes: ['qr', 'ean-13'],
   onCodeScanned: (codes) => {
     console.log(`Scanned ${codes.length} codes!`)
-  }
+  },
 })
 
 return <Camera {...props} codeScanner={codeScanner} />
@@ -104,7 +105,7 @@ const codeScanner: CodeScanner = {
   codeTypes: ['qr', 'ean-13'],
   onCodeScanned: (codes) => {
     console.log(`Scanned ${codes.length} codes!`)
-  }
+  },
 }
 ```
 
@@ -134,9 +135,9 @@ const codeScanner = useCodeScanner({
   codeTypes: ['upc-a'], // <-- ✅ We configure for 'upc-a' types
   onCodeScanned: (codes) => {
     for (const code of codes) {
-      console.log(code.type); // <-- ❌ On iOS, we receive 'ean-13'
+      console.log(code.type) // <-- ❌ On iOS, we receive 'ean-13'
     }
-  }
+  },
 })
 ```
 

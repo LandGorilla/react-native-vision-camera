@@ -5,19 +5,19 @@ on:
     branches:
       - main
     paths:
-      - ".github/workflows/update-lockfiles.yml"
+      - '.github/workflows/update-lockfiles.yml'
   pull_request:
     paths:
-      - ".github/workflows/update-lockfiles.yml"
-      - "package.json"
-      - "**/package.json"
+      - '.github/workflows/update-lockfiles.yml'
+      - 'package.json'
+      - '**/package.json'
 
 permissions:
   contents: write
 
 jobs:
   update-lockfiles:
-    name: "Update lockfiles (bun.lockb + Podfile.lock)"
+    name: 'Update lockfiles (Podfile.lock)'
     if: github.actor == 'dependabot[bot]'
     runs-on: macOS-latest
     steps:
@@ -37,7 +37,6 @@ jobs:
 
       - run: |
           bun install
-          git add bun.lockb
 
           cd example
           bun pods
